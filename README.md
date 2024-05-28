@@ -20,6 +20,7 @@ Link: https://www.youtube.com/playlist?list=PLVrN2LRb7eT3_la39bWC0EP-IW5jNjQ-w
 2. [BE544 Lecture 02 - Intro to Histopathology (Contd.)](https://youtu.be/HcG7DQJgFvQ)
 3. [BE544 Lecture 03 - Intro to QuPath](https://youtu.be/m2rRXoqZWOg)
 4. [BE544 Lecture 04 - Intro to Aperio ImageScope](https://youtu.be/1p0fDFCv34s)
+5. [BE544 Lecture 05 - Working with Annotations and Extracting Tiles](https://youtu.be/GDrhFgeukt8)
 
 ... and more to come!
 
@@ -36,7 +37,7 @@ Challenge Link: https://iciar2018-challenge.grand-challenge.org/Dataset/
 
 **Code**:
 
-All code used in the lectures will be available in this GitHub repository in the `Lectures Scripts` folder.
+All code used in the lectures will be available in this GitHub repository (https://github.com/HossamBalaha/BE-544-Artificial-Intelligence-Techniques-in-Digital-Histopathology) in the `Lectures Scripts` folder.
 
 ## Contact
 
