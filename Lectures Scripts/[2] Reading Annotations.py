@@ -1,3 +1,6 @@
+# Author: Hossam Magdy Balaha
+# Date: May 28th, 2024
+
 import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
 
@@ -9,10 +12,8 @@ anList = []  # List of annotations.
 tree = ET.parse(xmlFile)
 root = tree.getroot()
 
-
 annotations = root.findall(".//Annotation")
 print("Number of annotations: ", len(annotations))
-
 
 for annotation in annotations:
   regions = annotation.findall(".//Region")
@@ -36,6 +37,5 @@ for annotation in annotations:
         "Coords": coords
       }
     )
-
 
 print("Number of annotations: ", len(anList))

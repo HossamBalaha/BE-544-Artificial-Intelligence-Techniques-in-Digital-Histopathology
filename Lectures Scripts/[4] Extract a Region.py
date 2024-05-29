@@ -1,3 +1,6 @@
+# Author: Hossam Magdy Balaha
+# Date: May 28th, 2024
+
 # -------------------------------------------------- #
 # https://openslide.org/api/python/#installing
 OPENSLIDE_PATH = r"C:\openslide-bin-4.0.0.3-windows-x64\bin"
