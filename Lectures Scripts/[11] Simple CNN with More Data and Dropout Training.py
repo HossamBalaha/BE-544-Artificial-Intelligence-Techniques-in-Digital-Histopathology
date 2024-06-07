@@ -1,0 +1,171 @@
+# Author: Hossam Magdy Balaha
+# Date: May 4th, 2024
+
+import os, cv2
+import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+from tensorflow.keras.layers import *
+from tensorflow.keras.models import *
+from tensorflow.keras.optimizers import *
+from tensorflow.keras.losses import *
+from tensorflow.keras.metrics import *
+from tensorflow.keras.callbacks import *
+from tensorflow.keras.utils import to_categorical
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+print("TensorFlow Version:", tf.__version__)
+print("Num GPUs Available:", len(tf.config.list_physical_devices("GPU")))
+
+
+def LoadDataset(basePath, catsPaths, samplesPerClass, inputShape):
+  # Load images.
+  X, Y = [], []
+  for catPath in catsPaths:
+    files = os.listdir(os.path.join(basePath, catPath))
+    files = np.random.choice(files, samplesPerClass, replace=False)
+    for file in files:
+      img = cv2.imread(os.path.join(basePath, catPath, file))
+      img = cv2.resize(img, inputShape[:2], interpolation=cv2.INTER_CUBIC)
+      X.append(img)
+      Y.append(catPath.split("_")[-1])
+
+  # Preprocess data.
+  X = np.array(X) / 255.0
+  enc = LabelEncoder()
+  Y = enc.fit_transform(Y)
+  yCat = to_categorical(Y, num_classes=len(catsPaths))
+
+  print("X shape:", X.shape)
+  print("Y shape:", Y.shape)
+  print("yCat shape:", yCat.shape)
+  print("Classes:", enc.classes_)
+  print("X Data Type:", X.dtype)
+  print("Y Data Type:", Y.dtype)
+
+  return X, Y, yCat, enc
+
+
+def SimpleCNNDropout(inputShape, optimizer=Adam(), verbose=0):
+  model = Sequential([
+    Conv2D(32, kernel_size=(3, 3), strides=(2, 2), activation="relu", padding="same", input_shape=inputShape),
+    MaxPooling2D(pool_size=(2, 2)),
+    Conv2D(64, kernel_size=(3, 3), strides=(2, 2), activation="relu", padding="same"),
+    MaxPooling2D(pool_size=(2, 2)),
+    Conv2D(128, kernel_size=(3, 3), strides=(2, 2), activation="relu", padding="same"),
+    MaxPooling2D(pool_size=(2, 2)),
+    Flatten(),
+    Dropout(0.5),
+    Dense(128, activation="relu"),
+    Dropout(0.5),
+    Dense(64, activation="relu"),
+    Dense(3, activation="softmax"),
+  ])
+
+  model.compile(
+    optimizer=optimizer,
+    loss="categorical_crossentropy",  # "sparse_categorical_crossentropy",
+    metrics=[
+      CategoricalAccuracy(),
+      Precision(),
+      Recall(),
+      AUC(),
+      TruePositives(name="TP"),
+      TrueNegatives(name="TN"),
+      FalsePositives(name="FP"),
+      FalseNegatives(name="FN"),
+    ],
+  )
+
+  if (verbose):
+    model.summary()
+
+  return model
+
+
+inputShape = (256, 256, 3)
+samplesPerClass = 1500
+
+# Load data.
+basePath = r"Output"
+
+catsPaths = [
+  r"ROIs_0_512_512_256_256_Benign",
+  r"ROIs_0_512_512_256_256_Carcinoma in situ",
+  r"ROIs_0_512_512_256_256_Carcinoma invasive",
+]
+
+# Load images.
+X, Y, yCat, enc = LoadDataset(basePath, catsPaths, samplesPerClass, inputShape)
+
+# Create the model.
+model = SimpleCNNDropout(inputShape, optimizer=Adam(), verbose=1)
+
+# Split the data.
+xTrain, xTest, yCatTrain, yCatTest = train_test_split(
+  X, yCat, test_size=0.2, stratify=yCat, random_state=42
+)
+
+# Train the model.
+os.makedirs("History", exist_ok=True)
+history = model.fit(
+  xTrain, yCatTrain,
+  epochs=1000,
+  batch_size=16,
+  validation_split=0.2,
+  callbacks=[
+    ModelCheckpoint(
+      "History/SimpleCNNDropout.h5", save_best_only=True,
+      save_weights_only=False, monitor="val_categorical_accuracy",
+      verbose=1,
+    ),
+    EarlyStopping(patience=250),
+    CSVLogger("History/SimpleCNNDropout.log"),
+    ReduceLROnPlateau(factor=0.5, patience=25),
+    TensorBoard(log_dir="History/SimpleCNNDropout/Logs", histogram_freq=1),
+  ],
+  verbose=1,
+)
+
+# Load the best model.
+model.load_weights("History/SimpleCNNDropout.h5")
+
+# Evaluate the model.
+for (_x, _y) in [(xTrain, yCatTrain), (xTest, yCatTest)]:
+  result = model.evaluate(_x, _y, batch_size=16, verbose=0)
+  print("Loss:", result[0])
+  print("Categorical Accuracy:", result[1])
+  print("Precision:", result[2])
+  print("Recall:", result[3])
+  print("AUC:", result[4])
+  print("TP:", result[5])
+  print("TN:", result[6])
+  print("FP:", result[7])
+  print("FN:", result[8])
+
+# Plot the training and validation history.
+plt.figure()
+plt.subplot(2, 1, 1)
+plt.plot(history.history["loss"], label="Training Loss")
+plt.plot(history.history["val_loss"], label="Validation Loss")
+plt.legend()
+plt.grid()
+plt.tight_layout()
+plt.subplot(2, 1, 2)
+plt.plot(history.history["categorical_accuracy"], label="Training Accuracy")
+plt.plot(history.history["val_categorical_accuracy"], label="Validation Accuracy")
+plt.legend()
+plt.grid()
+plt.tight_layout()
+plt.show()
+
+# Plot the confusion matrix.
+yCatPred = model.predict(xTest, batch_size=16, verbose=0)
+yPred = np.argmax(yCatPred, axis=1)
+yTrue = np.argmax(yCatTest, axis=1)
+cm = confusion_matrix(yTrue, yPred)
+plt.figure()
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=enc.classes_)
+disp.plot()

@@ -12,6 +12,10 @@ intersection of technology and healthcare. Whether you're a student, researcher,
 healthcare technology, this playlist offers valuable insights into the innovative applications of AI in digital
 histopathology.
 
+> If you encountered any issues or errors in the code or lectures, please feel free to let me know. I will be more than
+ happy to fix them and update the repository accordingly. Your feedback is highly appreciated and will help me improve
+ the quality of the content provided in this series.
+
 ## Full Playlist and Videos
 
 This series is your gateway to the fascinating world of applying AI techniques to digital histopathology.
