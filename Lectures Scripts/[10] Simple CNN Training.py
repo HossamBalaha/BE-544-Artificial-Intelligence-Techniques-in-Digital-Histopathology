@@ -31,7 +31,7 @@ def SimpleCNN(inputShape, optimizer=Adam(), verbose=0):
     Flatten(),
     Dense(128, activation="relu"),
     Dense(64, activation="relu"),
-    Dense(3, activation="softmax"),
+    Dense(4, activation="softmax"),
   ])
 
   model.compile(
@@ -56,15 +56,18 @@ def SimpleCNN(inputShape, optimizer=Adam(), verbose=0):
 
 
 inputShape = (256, 256, 3)
+batchSize = 64
+epochs = 200
 samplesPerClass = 300
 
 # Load data.
-basePath = r"Output"
+basePath = r"BACH Updated Extracted/ROIs_0_256_256_32_32"
 
 catsPaths = [
-  r"ROIs_0_512_512_256_256_Benign",
-  r"ROIs_0_512_512_256_256_Carcinoma in situ",
-  r"ROIs_0_512_512_256_256_Carcinoma invasive",
+  r"Benign",
+  r"Carcinoma In Situ",
+  r"Carcinoma Invasive",
+  r"Normal",
 ]
 
 # Load images.
@@ -76,7 +79,7 @@ for catPath in catsPaths:
     img = cv2.imread(os.path.join(basePath, catPath, file))
     img = cv2.resize(img, inputShape[:2], interpolation=cv2.INTER_CUBIC)
     X.append(img)
-    Y.append(catPath.split("_")[-1])
+    Y.append(catPath)
 
 # Preprocess data.
 X = np.array(X) / 255.0
@@ -103,8 +106,8 @@ xTrain, xTest, yCatTrain, yCatTest = train_test_split(
 os.makedirs("History", exist_ok=True)
 history = model.fit(
   xTrain, yCatTrain,
-  epochs=1000,
-  batch_size=32,
+  epochs=epochs,
+  batch_size=batchSize,
   validation_split=0.2,
   callbacks=[
     ModelCheckpoint(
@@ -112,7 +115,7 @@ history = model.fit(
       save_weights_only=False, monitor="val_categorical_accuracy",
       verbose=1,
     ),
-    EarlyStopping(patience=100),
+    EarlyStopping(patience=50),
     CSVLogger("History/SimpleCNN.log"),
     ReduceLROnPlateau(factor=0.5, patience=10),
     TensorBoard(log_dir="History/SimpleCNN/Logs", histogram_freq=1),
@@ -125,7 +128,7 @@ model.load_weights("History/SimpleCNN.h5")
 
 # Evaluate the model.
 for (_x, _y) in [(xTrain, yCatTrain), (xTest, yCatTest)]:
-  result = model.evaluate(_x, _y, batch_size=16, verbose=0)
+  result = model.evaluate(_x, _y, batch_size=batchSize, verbose=0)
   print("Loss:", result[0])
   print("Categorical Accuracy:", result[1])
   print("Precision:", result[2])
@@ -150,13 +153,14 @@ plt.plot(history.history["val_categorical_accuracy"], label="Validation Accuracy
 plt.legend()
 plt.grid()
 plt.tight_layout()
+plt.savefig("History/SimpleCNN.png")
 plt.show()
 
 # Plot the confusion matrix.
-yCatPred = model.predict(xTest, batch_size=16, verbose=0)
+yCatPred = model.predict(xTest, batch_size=batchSize, verbose=0)
 yPred = np.argmax(yCatPred, axis=1)
 yTrue = np.argmax(yCatTest, axis=1)
 cm = confusion_matrix(yTrue, yPred)
-plt.figure()
 disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=enc.classes_)
 disp.plot()
+plt.show()

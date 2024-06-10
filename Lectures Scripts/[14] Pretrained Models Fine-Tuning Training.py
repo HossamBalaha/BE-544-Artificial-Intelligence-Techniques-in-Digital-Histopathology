@@ -1,5 +1,5 @@
 # Author: Hossam Magdy Balaha
-# Date: May 4th, 2024
+# Date: May 9th, 2024
 
 import os, cv2, splitfolders
 import numpy as np
@@ -13,46 +13,64 @@ from tensorflow.keras.metrics import *
 from tensorflow.keras.callbacks import *
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.applications import *
 
 print("TensorFlow Version:", tf.__version__)
 print("Num GPUs Available:", len(tf.config.list_physical_devices("GPU")))
 
 
-def SimpleCNNDropout(inputShape, optimizer=Adam(), verbose=0):
-  model = Sequential([
-    Conv2D(32, kernel_size=(3, 3), strides=(2, 2), activation="relu", padding="same", input_shape=inputShape),
-    MaxPooling2D(pool_size=(2, 2)),
-    Conv2D(64, kernel_size=(3, 3), strides=(2, 2), activation="relu", padding="same"),
-    MaxPooling2D(pool_size=(2, 2)),
-    Conv2D(128, kernel_size=(3, 3), strides=(2, 2), activation="relu", padding="same"),
-    MaxPooling2D(pool_size=(2, 2)),
-    Flatten(),
-    Dropout(0.5),
-    Dense(128, activation="relu"),
-    Dropout(0.5),
-    Dense(64, activation="relu"),
-    Dense(4, activation="softmax"),
-  ])
+def CalculateAllMetrics(cm):
+  # Calculate TP, TN, FP, FN.
+  TP = np.diag(cm)
+  FP = np.sum(cm, axis=0) - TP
+  FN = np.sum(cm, axis=1) - TP
+  TN = np.sum(cm) - (TP + FP + FN)
 
-  model.compile(
-    optimizer=optimizer,
-    loss="categorical_crossentropy",  # "sparse_categorical_crossentropy",
-    metrics=[
-      CategoricalAccuracy(),
-      Precision(),
-      Recall(),
-      AUC(),
-      TruePositives(name="TP"),
-      TrueNegatives(name="TN"),
-      FalsePositives(name="FP"),
-      FalseNegatives(name="FN"),
-    ],
-  )
+  results = {}
 
-  if (verbose):
-    model.summary()
+  # Using macro averaging.
+  precision = np.mean(TP / (TP + FP))
+  recall = np.mean(TP / (TP + FN))
+  f1 = 2 * precision * recall / (precision + recall)
+  accuracy = np.sum(TP) / np.sum(cm)
+  specificity = np.mean(TN / (TN + FP))
 
-  return model
+  results["Macro Precision"] = precision
+  results["Macro Recall"] = recall
+  results["Macro F1"] = f1
+  results["Macro Accuracy"] = accuracy
+  results["Macro Specificity"] = specificity
+
+  # Using micro averaging.
+  precision = np.sum(TP) / np.sum(TP + FP)
+  recall = np.sum(TP) / np.sum(TP + FN)
+  f1 = 2 * precision * recall / (precision + recall)
+  accuracy = np.sum(TP) / np.sum(cm)
+  specificity = np.sum(TN) / np.sum(TN + FP)
+
+  results["Micro Precision"] = precision
+  results["Micro Recall"] = recall
+  results["Micro F1"] = f1
+  results["Micro Accuracy"] = accuracy
+  results["Micro Specificity"] = specificity
+
+  # Using weighted averaging.
+  samples = np.sum(cm, axis=1)
+  weights = samples / np.sum(cm)
+
+  precision = np.sum(TP / (TP + FP) * weights)
+  recall = np.sum(TP / (TP + FN) * weights)
+  f1 = 2 * precision * recall / (precision + recall)
+  accuracy = np.sum(TP) / np.sum(cm)
+  specificity = np.sum(TN / (TN + FP) * weights)
+
+  results["Weighted Precision"] = precision
+  results["Weighted Recall"] = recall
+  results["Weighted F1"] = f1
+  results["Weighted Accuracy"] = accuracy
+  results["Weighted Specificity"] = specificity
+
+  return results
 
 
 inputShape = (256, 256, 3)
@@ -70,6 +88,14 @@ if (not os.path.exists(splitFolder)):
 
 trainDataGen = ImageDataGenerator(
   rescale=1.0 / 255.0,
+  rotation_range=45,
+  width_shift_range=0.1,
+  height_shift_range=0.1,
+  shear_range=0.1,
+  zoom_range=0.1,
+  horizontal_flip=True,
+  vertical_flip=True,
+  fill_mode="nearest",
 )
 
 trainGen = trainDataGen.flow_from_directory(
@@ -105,7 +131,37 @@ testGen = testDataGen.flow_from_directory(
 )
 
 # Create the model.
-model = SimpleCNNDropout(inputShape, optimizer=Adam(), verbose=1)
+vggModel = VGG16(
+  include_top=False,
+  weights="imagenet",
+  input_shape=inputShape,
+)
+
+for layer in vggModel.layers:
+  layer.trainable = False
+
+model = Sequential([
+  vggModel,
+  GlobalAveragePooling2D(),
+  Dense(512, activation="relu"),
+  Dropout(0.5),
+  Dense(4, activation="softmax"),
+])
+
+model.compile(
+  optimizer=Adam(),
+  loss="categorical_crossentropy",  # "sparse_categorical_crossentropy",
+  metrics=[
+    CategoricalAccuracy(),
+    Precision(),
+    Recall(),
+    AUC(),
+    TruePositives(name="TP"),
+    TrueNegatives(name="TN"),
+    FalsePositives(name="FP"),
+    FalseNegatives(name="FN"),
+  ],
+)
 
 # Train the model.
 os.makedirs("History", exist_ok=True)
@@ -116,20 +172,20 @@ history = model.fit(
   validation_data=valGen,
   callbacks=[
     ModelCheckpoint(
-      "History/SimpleCNNDropout.h5", save_best_only=True,
+      "History/SimpleCNNAugmentation.h5", save_best_only=True,
       save_weights_only=False, monitor="val_categorical_accuracy",
       verbose=1,
     ),
     EarlyStopping(patience=50),
-    CSVLogger("History/SimpleCNNDropout.log"),
+    CSVLogger("History/SimpleCNNAugmentation.log"),
     ReduceLROnPlateau(factor=0.5, patience=25),
-    TensorBoard(log_dir="History/SimpleCNNDropout/Logs", histogram_freq=1),
+    TensorBoard(log_dir="History/SimpleCNNAugmentation/Logs", histogram_freq=1),
   ],
   verbose=1,
 )
 
 # Load the best model.
-model.load_weights("History/SimpleCNNDropout.h5")
+model.load_weights("History/PretrainedVGG16.h5")
 
 # Evaluate the model.
 for name, dataGen in [("Training", trainGen), ("Validation", valGen), ("Testing", testGen)]:
@@ -159,7 +215,7 @@ plt.plot(history.history["val_categorical_accuracy"], label="Validation Accuracy
 plt.legend()
 plt.grid()
 plt.tight_layout()
-plt.savefig("History/SimpleCNNDropout.png")
+plt.savefig("History/SimpleCNNAugmentation.png")
 plt.show()
 
 # Plot the confusion matrix.
@@ -169,4 +225,10 @@ yTrue = testGen.classes
 cm = confusion_matrix(yTrue, yPred)
 disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=testGen.class_indices)
 disp.plot()
+plt.savefig("History/SimpleCNNAugmentationCM.png")
 plt.show()
+
+# Calculate all metrics.
+results = CalculateAllMetrics(cm)
+for key, value in results.items():
+  print(f"{key}:", value)

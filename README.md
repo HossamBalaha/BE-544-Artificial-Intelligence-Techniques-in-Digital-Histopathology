@@ -31,6 +31,8 @@ Link: https://www.youtube.com/playlist?list=PLVrN2LRb7eT3_la39bWC0EP-IW5jNjQ-w
 4. [BE544 Lecture 04 - Intro to Aperio ImageScope](https://youtu.be/1p0fDFCv34s)
 5. [BE544 Lecture 05 - Working with Annotations and Extracting Tiles](https://youtu.be/GDrhFgeukt8)
 6. [BE544 Lecture 06 - Working with Annotations and Extracting Tiles (Contd.)](https://youtu.be/TX3AUxNZVLU)
+7. [BE544 Lecture 07 - Classification using Convolutional Neural Network](https://youtu.be/lZSJqs9xrJM)
+8. [BE544 Lecture 08 - Classification using Convolutional Neural Network (Contd.)](https://youtu.be/erSsRc7BIQM)
 
 ... and more to come!
 

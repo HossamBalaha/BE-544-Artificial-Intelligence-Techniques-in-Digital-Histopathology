@@ -4,5 +4,9 @@ Lectures Scripts/Output
 Lectures Scripts/Output/*
 Lectures Scripts/Output/*.*
 Lectures Scripts/Output/*/*
+Lectures Scripts/History
+Lectures Scripts/History/*
+Lectures Scripts/History/*.*
+Lectures Scripts/History/*/*
 Lectures Scripts/*.svs
 Lectures Scripts/*.xml

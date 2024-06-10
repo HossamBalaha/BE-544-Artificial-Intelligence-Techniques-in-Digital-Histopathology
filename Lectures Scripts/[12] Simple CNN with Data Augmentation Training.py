@@ -1,7 +1,7 @@
 # Author: Hossam Magdy Balaha
 # Date: May 4th, 2024
 
-import os, cv2
+import os, cv2, splitfolders
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
@@ -11,42 +11,11 @@ from tensorflow.keras.optimizers import *
 from tensorflow.keras.losses import *
 from tensorflow.keras.metrics import *
 from tensorflow.keras.callbacks import *
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.utils import to_categorical
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 print("TensorFlow Version:", tf.__version__)
 print("Num GPUs Available:", len(tf.config.list_physical_devices("GPU")))
-
-
-def LoadDataset(basePath, catsPaths, samplesPerClass, inputShape):
-  # Load images.
-  X, Y = [], []
-  for catPath in catsPaths:
-    files = os.listdir(os.path.join(basePath, catPath))
-    files = np.random.choice(files, samplesPerClass, replace=False)
-    for file in files:
-      img = cv2.imread(os.path.join(basePath, catPath, file))
-      img = cv2.resize(img, inputShape[:2], interpolation=cv2.INTER_CUBIC)
-      X.append(img)
-      Y.append(catPath.split("_")[-1])
-
-  # Preprocess data.
-  X = np.array(X) / 255.0
-  enc = LabelEncoder()
-  Y = enc.fit_transform(Y)
-  yCat = to_categorical(Y, num_classes=len(catsPaths))
-
-  print("X shape:", X.shape)
-  print("Y shape:", Y.shape)
-  print("yCat shape:", yCat.shape)
-  print("Classes:", enc.classes_)
-  print("X Data Type:", X.dtype)
-  print("Y Data Type:", Y.dtype)
-
-  return X, Y, yCat, enc
 
 
 def SimpleCNNDropout(inputShape, optimizer=Adam(), verbose=0):
@@ -62,7 +31,7 @@ def SimpleCNNDropout(inputShape, optimizer=Adam(), verbose=0):
     Dense(128, activation="relu"),
     Dropout(0.5),
     Dense(64, activation="relu"),
-    Dense(3, activation="softmax"),
+    Dense(4, activation="softmax"),
   ])
 
   model.compile(
@@ -87,54 +56,79 @@ def SimpleCNNDropout(inputShape, optimizer=Adam(), verbose=0):
 
 
 inputShape = (256, 256, 3)
-samplesPerClass = 1500
+batchSize = 32
+epochs = 200
+basePath = r"BACH Updated Extracted\ROIs_0_256_256_32_32"
+splitFolder = r"BACH Updated Extracted\ROIs_0_256_256_32_32_Split"
 
-# Load data.
-basePath = r"Output"
+if (not os.path.exists(splitFolder)):
+  splitfolders.fixed(
+    basePath,
+    output=splitFolder, seed=42,
+    fixed=(2000, 500, 500),
+  )
 
-catsPaths = [
-  r"ROIs_0_512_512_256_256_Benign",
-  r"ROIs_0_512_512_256_256_Carcinoma in situ",
-  r"ROIs_0_512_512_256_256_Carcinoma invasive",
-]
+trainDataGen = ImageDataGenerator(
+  rescale=1.0 / 255.0,
+  rotation_range=45,
+  width_shift_range=0.1,
+  height_shift_range=0.1,
+  shear_range=0.1,
+  zoom_range=0.1,
+  horizontal_flip=True,
+  vertical_flip=True,
+  fill_mode="nearest",
+)
 
-# Load images.
-X, Y, yCat, enc = LoadDataset(basePath, catsPaths, samplesPerClass, inputShape)
+trainGen = trainDataGen.flow_from_directory(
+  f"{splitFolder}/train",
+  target_size=inputShape[:2],
+  batch_size=batchSize,
+  class_mode="categorical",
+  shuffle=True,
+)
+
+valDataGen = ImageDataGenerator(
+  rescale=1.0 / 255.0,
+)
+
+valGen = valDataGen.flow_from_directory(
+  f"{splitFolder}/val",
+  target_size=inputShape[:2],
+  batch_size=batchSize,
+  class_mode="categorical",
+  shuffle=True,
+)
+
+testDataGen = ImageDataGenerator(
+  rescale=1.0 / 255.0,
+)
+
+testGen = testDataGen.flow_from_directory(
+  f"{splitFolder}/test",
+  target_size=inputShape[:2],
+  batch_size=batchSize,
+  class_mode="categorical",
+  shuffle=False,
+)
 
 # Create the model.
 model = SimpleCNNDropout(inputShape, optimizer=Adam(), verbose=1)
 
-# Split the data.
-xTrain, xTest, yCatTrain, yCatTest = train_test_split(
-  X, yCat, test_size=0.2, stratify=yCat, random_state=42
-)
-
-# Data augmentation.
-datagen = ImageDataGenerator(
-  rotation_range=20,
-  width_shift_range=0.1,
-  height_shift_range=0.1,
-  zoom_range=0.1,
-  horizontal_flip=True,
-  vertical_flip=True,
-)
-datagen.fit(xTrain)
-dataFlow = datagen.flow(xTrain, yCatTrain, batch_size=16)
-
 # Train the model.
 os.makedirs("History", exist_ok=True)
 history = model.fit(
-  dataFlow,
-  epochs=1000,
-  batch_size=16,
-  validation_split=0.2,
+  trainGen,
+  epochs=epochs,
+  batch_size=batchSize,
+  validation_data=valGen,
   callbacks=[
     ModelCheckpoint(
       "History/SimpleCNNAugmentation.h5", save_best_only=True,
       save_weights_only=False, monitor="val_categorical_accuracy",
       verbose=1,
     ),
-    EarlyStopping(patience=250),
+    EarlyStopping(patience=50),
     CSVLogger("History/SimpleCNNAugmentation.log"),
     ReduceLROnPlateau(factor=0.5, patience=25),
     TensorBoard(log_dir="History/SimpleCNNAugmentation/Logs", histogram_freq=1),
@@ -146,8 +140,9 @@ history = model.fit(
 model.load_weights("History/SimpleCNNAugmentation.h5")
 
 # Evaluate the model.
-for (_x, _y) in [(xTrain, yCatTrain), (xTest, yCatTest)]:
-  result = model.evaluate(_x, _y, batch_size=16, verbose=0)
+for name, dataGen in [("Training", trainGen), ("Validation", valGen), ("Testing", testGen)]:
+  print(f"{name} Evaluation:")
+  result = model.evaluate(dataGen, batch_size=batchSize, verbose=0)
   print("Loss:", result[0])
   print("Categorical Accuracy:", result[1])
   print("Precision:", result[2])
@@ -172,13 +167,14 @@ plt.plot(history.history["val_categorical_accuracy"], label="Validation Accuracy
 plt.legend()
 plt.grid()
 plt.tight_layout()
+plt.savefig("History/SimpleCNNAugmentation.png")
 plt.show()
 
 # Plot the confusion matrix.
-yCatPred = model.predict(xTest, batch_size=16, verbose=0)
+yCatPred = model.predict(testGen, batch_size=batchSize, verbose=0)
 yPred = np.argmax(yCatPred, axis=1)
-yTrue = np.argmax(yCatTest, axis=1)
+yTrue = testGen.classes
 cm = confusion_matrix(yTrue, yPred)
-plt.figure()
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=enc.classes_)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=testGen.class_indices)
 disp.plot()
+plt.show()
