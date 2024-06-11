@@ -13,8 +13,8 @@ healthcare technology, this playlist offers valuable insights into the innovativ
 histopathology.
 
 > If you encountered any issues or errors in the code or lectures, please feel free to let me know. I will be more than
- happy to fix them and update the repository accordingly. Your feedback is highly appreciated and will help me improve
- the quality of the content provided in this series.
+> happy to fix them and update the repository accordingly. Your feedback is highly appreciated and will help me improve
+> the quality of the content provided in this series.
 
 ## Full Playlist and Videos
 
@@ -36,7 +36,7 @@ Link: https://www.youtube.com/playlist?list=PLVrN2LRb7eT3_la39bWC0EP-IW5jNjQ-w
 
 ... and more to come!
 
-## Dataset and Code
+## Dataset, Extracted Patches, and Code
 
 **Datasets**:
 
@@ -49,6 +49,82 @@ Challenge Link: https://iciar2018-challenge.grand-challenge.org/Dataset/
 
 > Citation: Polónia, A., Eloy, C., & Aguiar, P. (2019). BACH Dataset : Grand Challenge on Breast Cancer Histology
 > images [Data set]. In Medical Image Analysis (Vol. 56, pp. 122–139). Zenodo. https://doi.org/10.5281/zenodo.3632035
+
+**Extracted Patches**:
+
+You can use the extracted patches (link below) from the dataset called the “BACH Dataset.” These patches are organized
+for training, testing, and validation across the three magnification levels and four classes. To download the extracted
+patches, you can use the following link:
+
+> https://drive.google.com/drive/folders/1FqSs-xWs-vvcHUl3ojkBbTzZl-JEK9oJ
+
+Each compressed ROI/Tiles file in the previous link will comprise three subfolders: train, val, and test. Within each of
+these, there will be four inner subfolders representing the four categories. The naming of the compressed files/folders
+pattern is `{ROIs/Tiles}_{level}_{width}_{height}_{width overlap}_{height overlap}_Split`.
+
+For replicability, the dataset's structure and associated metadata are detailed in the table below. The overlap measures
+32 in width and height for level 0, 4 for levels 1 and 2. A maximum of 2,000 samples are extracted from each region. The
+tolerance, based on the base level, is set to 0.7. The Python snippet `[8] Extract All Tiles with Overlapping.py` is
+employed for this purpose.
+
+<center>
+<table align="center" style="font-size: smaller;margin-left: auto;margin-right: auto;">
+    <tr>
+        <th></th>
+        <th>Level 0 (Base Level)</th>
+        <th>Level 1</th>
+        <th>Level 2</th>
+    </tr>
+    <tr>
+        <td>ROI Filename</td>
+        <td>ROIs_0_256_256_32_32_Split</td>
+        <td>ROIs_1_256_256_32_32_Split</td>
+        <td>ROIs_2_256_256_32_32_Split</td>
+    </tr>
+    <tr>
+        <td>Tiles Filename</td>
+        <td>Tiles_0_256_256_32_32_Split</td>
+        <td>Tiles_1_256_256_32_32_Split</td>
+        <td>Tiles_2_256_256_32_32_Split</td>
+    </tr>
+    <tr>
+        <td>Shape (Width x Height)</td>
+        <td>256x256</td>
+        <td>256x256</td>
+        <td>256x256</td>
+    </tr>
+    <tr>
+        <td>Overlap (Width x Height)</td>
+        <td>32x32</td>
+        <td>4x4</td>
+        <td>4x4</td>
+    </tr>
+    <tr>
+        <td># Patches Count</td>
+        <td>12,000 (3K/Class)</td>
+        <td>1,500 (375/Class)</td>
+        <td>280 (70/Class)</td>
+    </tr>
+    <tr>
+        <td># Training Count</td>
+        <td>8,000 (2K/Class)</td>
+        <td>1,100 (275/Class)</td>
+        <td>200 (50/Class)</td>
+    </tr>
+    <tr>
+        <td># Validation Count</td>
+        <td>2,000 (500/Class)</td>
+        <td>200 (50/Class)</td>
+        <td>40 (10/Class)</td>
+    </tr>
+    <tr>
+        <td># Testing Count</td>
+        <td>2,000 (500/Class)</td>
+        <td>200 (50/Class)</td>
+        <td>40 (10/Class)</td>
+    </tr>
+</table>
+</center>
 
 **Code**:
 
