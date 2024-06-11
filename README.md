@@ -33,6 +33,7 @@ Link: https://www.youtube.com/playlist?list=PLVrN2LRb7eT3_la39bWC0EP-IW5jNjQ-w
 6. [BE544 Lecture 06 - Working with Annotations and Extracting Tiles (Contd.)](https://youtu.be/TX3AUxNZVLU)
 7. [BE544 Lecture 07 - Classification using Convolutional Neural Network](https://youtu.be/lZSJqs9xrJM)
 8. [BE544 Lecture 08 - Classification using Convolutional Neural Network (Contd.)](https://youtu.be/erSsRc7BIQM)
+9. [BE544 Lecture 09 - Classification using Convolutional Neural Network (Contd.)](https://youtu.be/KBZyldoAM48)
 
 ... and more to come!
 
@@ -78,14 +79,14 @@ employed for this purpose.
     <tr>
         <td>ROI Filename</td>
         <td>ROIs_0_256_256_32_32_Split</td>
-        <td>ROIs_1_256_256_32_32_Split</td>
-        <td>ROIs_2_256_256_32_32_Split</td>
+        <td>ROIs_1_256_256_4_4_Split</td>
+        <td>ROIs_2_256_256_4_4_Split</td>
     </tr>
     <tr>
         <td>Tiles Filename</td>
         <td>Tiles_0_256_256_32_32_Split</td>
-        <td>Tiles_1_256_256_32_32_Split</td>
-        <td>Tiles_2_256_256_32_32_Split</td>
+        <td>Tiles_1_256_256_4_4_Split</td>
+        <td>Tiles_2_256_256_4_4_Split</td>
     </tr>
     <tr>
         <td>Shape (Width x Height)</td>
