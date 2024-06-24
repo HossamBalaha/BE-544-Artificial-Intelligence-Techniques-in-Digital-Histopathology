@@ -1,5 +1,6 @@
 # Author: Hossam Magdy Balaha
-# Date: May 4th, 2024
+# Date: June 4th, 2024
+# Permissions and Citation: Refer to the README file.
 
 import os, cv2, splitfolders
 import numpy as np

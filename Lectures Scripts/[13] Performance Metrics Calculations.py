@@ -1,14 +1,24 @@
 # Author: Hossam Magdy Balaha
-# Date: May 9th, 2024
+# Date: June 9th, 2024
+# Permissions and Citation: Refer to the README file.
 
 import numpy as np
 
+# Example 1: Balanced classes.
 confMatrix = [
   [50, 2, 1, 2],
   [3, 45, 5, 2],
   [1, 2, 40, 7],
   [0, 1, 3, 51],
 ]
+
+# Example 2: Imbalanced classes.
+# confMatrix = [
+#   [90, 3, 1, 1],
+#   [4, 120, 8, 3],
+#   [2, 7, 50, 12],
+#   [3, 5, 10, 25],
+# ]
 
 confMatrix = np.array(confMatrix)
 

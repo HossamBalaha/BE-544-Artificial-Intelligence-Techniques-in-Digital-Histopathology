@@ -1,8 +1,8 @@
 # Author: Hossam Magdy Balaha
 # Date: May 28th, 2024
+# Permissions and Citation: Refer to the README file.
 
 import xml.etree.ElementTree as ET
-import matplotlib.pyplot as plt
 
 xmlFile = r"A02.xml"
 

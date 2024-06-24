@@ -1,5 +1,6 @@
 # Author: Hossam Magdy Balaha
-# Date: May 3rd, 2024
+# Date: June 3rd, 2024
+# Permissions and Citation: Refer to the README file.
 
 from tensorflow.keras.layers import *
 from tensorflow.keras.models import *

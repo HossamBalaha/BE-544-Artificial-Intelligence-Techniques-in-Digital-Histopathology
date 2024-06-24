@@ -1,5 +1,5 @@
 # Author: Hossam Magdy Balaha
-# Date: June 9th, 2024
+# Date: June 23th, 2024
 # Permissions and Citation: Refer to the README file.
 
 import os, splitfolders
@@ -15,9 +15,16 @@ from tensorflow.keras.callbacks import *
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.applications import *
+import keras_tuner as kt
 
 print("TensorFlow Version:", tf.__version__)
 print("Num GPUs Available:", len(tf.config.list_physical_devices("GPU")))
+
+INPUT_SHAPE = (256, 256, 3)
+MAX_EPOCHS = 100
+
+basePath = r"BACH Updated Extracted\ROIs_0_256_256_32_32"
+splitFolder = r"BACH Updated Extracted\ROIs_0_256_256_32_32_Split"
 
 
 def CalculateAllMetrics(cm):
@@ -74,18 +81,100 @@ def CalculateAllMetrics(cm):
   return results
 
 
-inputShape = (256, 256, 3)
-batchSize = 32
-epochs = 200
-basePath = r"BACH Updated Extracted\ROIs_0_256_256_32_32"
-splitFolder = r"BACH Updated Extracted\ROIs_0_256_256_32_32_Split"
+def ModelHyperparamsBuilder():
+  hp = kt.HyperParameters()
 
-if (not os.path.exists(splitFolder)):
-  splitfolders.fixed(
-    basePath,
-    output=splitFolder, seed=42,
-    fixed=(2000, 500, 500),
+  hp.Choice("baseModel", ["MobileNetV2", "InceptionV3", "ResNet50", "VGG16", "VGG19", "Xception"])
+  hp.Choice("optimizer", ["Adam", "RMSprop", "SGD", "Adagrad", "Adadelta", "Adamax", "Nadam"])
+  hp.Choice("learningRate", [1e-2, 1e-3, 1e-4, 1e-5])
+  hp.Choice("batchSize", [8, 16, 32, 64])
+  hp.Choice("applyDropout", [True, False])
+  hp.Choice("dropout", [0.1, 0.2, 0.3, 0.4, 0.5])
+
+  return hp
+
+
+def ModelBuilder(hp):
+  baseModelCls = {
+    "MobileNetV2": MobileNetV2,
+    "InceptionV3": InceptionV3,
+    "ResNet50"   : ResNet50,
+    "VGG16"      : VGG16,
+    "VGG19"      : VGG19,
+    "Xception"   : Xception,
+  }
+
+  optimizerCls = {
+    "Adam"    : Adam,
+    "RMSprop" : RMSprop,
+    "SGD"     : SGD,
+    "Adagrad" : Adagrad,
+    "Adadelta": Adadelta,
+    "Adamax"  : Adamax,
+    "Nadam"   : Nadam,
+  }
+
+  baseModel = baseModelCls[hp["baseModel"]](
+    include_top=False,
+    weights="imagenet",
+    input_shape=INPUT_SHAPE,
   )
+
+  for layer in baseModel.layers:
+    layer.trainable = False
+
+  layers = [
+    baseModel,
+    GlobalAveragePooling2D(),
+    Dense(128, activation="relu"),
+    Dense(64, activation="relu"),
+    Dense(4, activation="softmax"),
+  ]
+
+  if (hp["applyDropout"]):
+    layers.insert(4, Dropout(hp["dropout"]))
+    layers.insert(3, Dropout(hp["dropout"]))
+
+  model = Sequential(layers)
+
+  model.compile(
+    optimizer=optimizerCls[hp["optimizer"]](learning_rate=hp["learningRate"]),
+    loss="categorical_crossentropy",
+    metrics=[
+      CategoricalAccuracy(),
+      Precision(),
+      Recall(),
+      AUC(),
+      TruePositives(name="TP"),
+      TrueNegatives(name="TN"),
+      FalsePositives(name="FP"),
+      FalseNegatives(name="FN"),
+    ],
+  )
+
+  model.summary()
+
+  return model
+
+
+def ModelTuner():
+  hp = ModelHyperparamsBuilder()
+
+  tuner = kt.Hyperband(
+    ModelBuilder,
+    hyperparameters=hp,
+    objective="val_categorical_accuracy",
+    max_epochs=MAX_EPOCHS,  # This is the maximum number of epochs to train the model.
+    factor=7,  # This is the downsampling factor for the number of epochs.
+    directory="History",
+    project_name="PretrainedKerasTuner",
+    overwrite=False,
+  )
+
+  return tuner
+
+
+tuner = ModelTuner()
 
 trainDataGen = ImageDataGenerator(
   rescale=1.0 / 255.0,
@@ -101,8 +190,7 @@ trainDataGen = ImageDataGenerator(
 
 trainGen = trainDataGen.flow_from_directory(
   f"{splitFolder}/train",
-  target_size=inputShape[:2],
-  batch_size=batchSize,
+  target_size=INPUT_SHAPE[:2],
   class_mode="categorical",
   shuffle=True,
 )
@@ -113,8 +201,7 @@ valDataGen = ImageDataGenerator(
 
 valGen = valDataGen.flow_from_directory(
   f"{splitFolder}/val",
-  target_size=inputShape[:2],
-  batch_size=batchSize,
+  target_size=INPUT_SHAPE[:2],
   class_mode="categorical",
   shuffle=True,
 )
@@ -125,75 +212,47 @@ testDataGen = ImageDataGenerator(
 
 testGen = testDataGen.flow_from_directory(
   f"{splitFolder}/test",
-  target_size=inputShape[:2],
-  batch_size=batchSize,
+  target_size=INPUT_SHAPE[:2],
   class_mode="categorical",
   shuffle=False,
 )
 
-# Create the model.
-baseModel = MobileNetV2(
-  include_top=False,
-  weights="imagenet",
-  input_shape=inputShape,
-)
+# Get the best hyperparameters.
+bestHP = tuner.get_best_hyperparameters(1)[0]
 
-for layer in baseModel.layers:
-  layer.trainable = False
+print("Best Hyperparameters:")
+print(bestHP.values)
 
-model = Sequential([
-  baseModel,
-  GlobalAveragePooling2D(),
-  Dense(128, activation="relu"),
-  Dropout(0.5),
-  Dense(64, activation="relu"),
-  Dropout(0.5),
-  Dense(4, activation="softmax"),
-])
+# Build the model with the best hyperparameters.
+model = ModelBuilder(bestHP)
 
-model.compile(
-  optimizer=Adam(),
-  loss="categorical_crossentropy",  # "sparse_categorical_crossentropy",
-  metrics=[
-    CategoricalAccuracy(),
-    Precision(),
-    Recall(),
-    AUC(),
-    TruePositives(name="TP"),
-    TrueNegatives(name="TN"),
-    FalsePositives(name="FP"),
-    FalseNegatives(name="FN"),
-  ],
-)
-
-# Train the model.
-os.makedirs("History", exist_ok=True)
+# Train the best model.
 history = model.fit(
   trainGen,
-  epochs=epochs,
-  batch_size=batchSize,
+  epochs=MAX_EPOCHS,
+  batch_size=bestHP["batchSize"],
   validation_data=valGen,
   callbacks=[
     ModelCheckpoint(
-      "History/PretrainedMobileNetV2.h5", save_best_only=True,
+      "History/PretrainedKerasTunerBestHP/Chk.h5", save_best_only=True,
       save_weights_only=False, monitor="val_categorical_accuracy",
       verbose=1,
     ),
-    EarlyStopping(patience=50),
-    CSVLogger("History/PretrainedMobileNetV2.log"),
-    ReduceLROnPlateau(factor=0.5, patience=25),
-    TensorBoard(log_dir="History/PretrainedMobileNetV2/Logs", histogram_freq=1),
+    EarlyStopping(patience=0.1 * MAX_EPOCHS),
+    CSVLogger("History/PretrainedKerasTunerBestHP/Log.log"),
+    ReduceLROnPlateau(factor=0.5, patience=0.05 * MAX_EPOCHS),
+    TensorBoard(log_dir="History/PretrainedKerasTunerBestHP/Logs", histogram_freq=1),
   ],
   verbose=1,
 )
 
 # Load the best model.
-model.load_weights("History/PretrainedMobileNetV2.h5")
+model.load_weights("History/PretrainedKerasTunerBestHP/Chk.h5")
 
 # Evaluate the model.
 for name, dataGen in [("Training", trainGen), ("Validation", valGen), ("Testing", testGen)]:
   print(f"{name} Evaluation:")
-  result = model.evaluate(dataGen, batch_size=batchSize, verbose=0)
+  result = model.evaluate(dataGen, batch_size=bestHP["batchSize"], verbose=0)
   print("Loss:", result[0])
   print("Categorical Accuracy:", result[1])
   print("Precision:", result[2])
@@ -218,17 +277,17 @@ plt.plot(history.history["val_categorical_accuracy"], label="Validation Accuracy
 plt.legend()
 plt.grid()
 plt.tight_layout()
-plt.savefig("History/PretrainedMobileNetV2.png")
+plt.savefig("History/PretrainedKerasTunerBestHP/Curves.png")
 plt.show()
 
 # Plot the confusion matrix.
-yCatPred = model.predict(testGen, batch_size=batchSize, verbose=0)
+yCatPred = model.predict(testGen, batch_size=bestHP["batchSize"], verbose=0)
 yPred = np.argmax(yCatPred, axis=1)
 yTrue = testGen.classes
 cm = confusion_matrix(yTrue, yPred)
 disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=testGen.class_indices)
 disp.plot()
-plt.savefig("History/PretrainedMobileNetV2.png")
+plt.savefig("History/PretrainedKerasTunerBestHP/CM.png")
 plt.show()
 
 # Calculate all metrics.
