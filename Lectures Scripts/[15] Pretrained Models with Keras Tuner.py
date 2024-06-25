@@ -4,7 +4,6 @@
 
 import os, splitfolders
 import numpy as np
-import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.layers import *
 from tensorflow.keras.models import *
@@ -12,7 +11,6 @@ from tensorflow.keras.optimizers import *
 from tensorflow.keras.losses import *
 from tensorflow.keras.metrics import *
 from tensorflow.keras.callbacks import *
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.applications import *
 import keras_tuner as kt
@@ -235,3 +233,9 @@ tuner.search(
   ],
   verbose=1,
 )
+
+# Get the best hyperparameters.
+bestHP = tuner.get_best_hyperparameters(1)[0]
+
+print("Best Hyperparameters:")
+print(bestHP.values)

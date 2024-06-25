@@ -253,7 +253,7 @@ study = optuna.create_study(
   direction="maximize",  # We want to maximize the categorical accuracy.
   study_name="PretrainedOptuna",  # This is the name of the study.
   load_if_exists=True,  # This will load the study if it exists.
-  storage="sqlite:///History/[18] PretrainedOptuna/PretrainedOptuna.db",  # This is the database file.
+  storage="sqlite:///History/PretrainedOptuna/PretrainedOptuna.db",  # This is the database file.
 )
 study.optimize(
   ObjectiveFunction,
