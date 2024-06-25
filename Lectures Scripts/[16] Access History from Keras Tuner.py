@@ -7,9 +7,7 @@ import tensorflow as tf
 from tensorflow.keras.layers import *
 from tensorflow.keras.models import *
 from tensorflow.keras.optimizers import *
-from tensorflow.keras.losses import *
 from tensorflow.keras.metrics import *
-from tensorflow.keras.callbacks import *
 from tensorflow.keras.applications import *
 import keras_tuner as kt
 
@@ -18,60 +16,6 @@ print("Num GPUs Available:", len(tf.config.list_physical_devices("GPU")))
 
 INPUT_SHAPE = (256, 256, 3)
 MAX_EPOCHS = 100
-
-
-def CalculateAllMetrics(cm):
-  # Calculate TP, TN, FP, FN.
-  TP = np.diag(cm)
-  FP = np.sum(cm, axis=0) - TP
-  FN = np.sum(cm, axis=1) - TP
-  TN = np.sum(cm) - (TP + FP + FN)
-
-  results = {}
-
-  # Using macro averaging.
-  precision = np.mean(TP / (TP + FP))
-  recall = np.mean(TP / (TP + FN))
-  f1 = 2 * precision * recall / (precision + recall)
-  accuracy = np.sum(TP) / np.sum(cm)
-  specificity = np.mean(TN / (TN + FP))
-
-  results["Macro Precision"] = precision
-  results["Macro Recall"] = recall
-  results["Macro F1"] = f1
-  results["Macro Accuracy"] = accuracy
-  results["Macro Specificity"] = specificity
-
-  # Using micro averaging.
-  precision = np.sum(TP) / np.sum(TP + FP)
-  recall = np.sum(TP) / np.sum(TP + FN)
-  f1 = 2 * precision * recall / (precision + recall)
-  accuracy = np.sum(TP) / np.sum(cm)
-  specificity = np.sum(TN) / np.sum(TN + FP)
-
-  results["Micro Precision"] = precision
-  results["Micro Recall"] = recall
-  results["Micro F1"] = f1
-  results["Micro Accuracy"] = accuracy
-  results["Micro Specificity"] = specificity
-
-  # Using weighted averaging.
-  samples = np.sum(cm, axis=1)
-  weights = samples / np.sum(cm)
-
-  precision = np.sum(TP / (TP + FP) * weights)
-  recall = np.sum(TP / (TP + FN) * weights)
-  f1 = 2 * precision * recall / (precision + recall)
-  accuracy = np.sum(TP) / np.sum(cm)
-  specificity = np.sum(TN / (TN + FP) * weights)
-
-  results["Weighted Precision"] = precision
-  results["Weighted Recall"] = recall
-  results["Weighted F1"] = f1
-  results["Weighted Accuracy"] = accuracy
-  results["Weighted Specificity"] = specificity
-
-  return results
 
 
 def ModelHyperparamsBuilder():

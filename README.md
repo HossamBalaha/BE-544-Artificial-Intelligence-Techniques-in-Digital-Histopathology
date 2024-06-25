@@ -34,6 +34,7 @@ Link: https://www.youtube.com/playlist?list=PLVrN2LRb7eT3_la39bWC0EP-IW5jNjQ-w
 7. [BE544 Lecture 07 - Classification using Convolutional Neural Network](https://youtu.be/lZSJqs9xrJM)
 8. [BE544 Lecture 08 - Classification using Convolutional Neural Network (Contd.)](https://youtu.be/erSsRc7BIQM)
 9. [BE544 Lecture 09 - Classification using Convolutional Neural Network (Contd.)](https://youtu.be/KBZyldoAM48)
+10. [BE544 Lecture 10 - Performance Metrics and Transfer Learning](https://youtu.be/s0_SFBuJ16E)
 
 ... and more to come!
 
@@ -50,6 +51,7 @@ The programming language used in this series is `Python`, and the primary librar
 7. `Keras` - An open-source neural network library written in Python.
 8. `Split Folders` - A simple library to split folders into training, validation, and testing directories.
 9. `Keras Tuner` - A library to perform hyperparameter tuning for Keras models.
+10. `Optuna` - An automatic hyperparameter optimization software framework, particularly designed for machine learning.
 
 The packages versions of the libraries used in this series are:
 
@@ -62,6 +64,7 @@ tensorflow==2.10.1
 keras==2.10.0
 splitfolders==0.5.1
 keras_tuner==1.4.7
+optuna==3.6.1
 ```
 
 To install the required libraries, you can use the following PIP commands:
@@ -76,6 +79,7 @@ pip install tensorflow==2.10.1
 pip install keras==2.10.0
 pip install split-folders==0.5.1
 pip install keras-tuner==1.4.7
+pip install optuna==3.6.1
 ```
 
 _Disclaimer: The versions of the libraries may change based on updates and releases. However, the code should work
