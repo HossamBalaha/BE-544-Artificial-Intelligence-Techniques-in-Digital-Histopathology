@@ -35,6 +35,9 @@ Link: https://www.youtube.com/playlist?list=PLVrN2LRb7eT3_la39bWC0EP-IW5jNjQ-w
 8. [BE544 Lecture 08 - Classification using Convolutional Neural Network (Contd.)](https://youtu.be/erSsRc7BIQM)
 9. [BE544 Lecture 09 - Classification using Convolutional Neural Network (Contd.)](https://youtu.be/KBZyldoAM48)
 10. [BE544 Lecture 10 - Performance Metrics and Transfer Learning](https://youtu.be/s0_SFBuJ16E)
+11. [BE544 Lecture 11 - Hyperparameters Optimization using Keras Tuner and Optuna](https://youtu.be/cdoDTCXaqGg)
+12. [BE544 Lecture 12 - Vision Transformers (ViTs) Explained](https://youtu.be/ICt4ga5RnFM)
+13. [BE544 Lecture 13 - Vision Transformers (ViTs) Implementation and Training from Scratch](https://youtu.be/Xn3jkNomS_E)
 
 ... and more to come!
 
@@ -52,6 +55,15 @@ The programming language used in this series is `Python`, and the primary librar
 8. `Split Folders` - A simple library to split folders into training, validation, and testing directories.
 9. `Keras Tuner` - A library to perform hyperparameter tuning for Keras models.
 10. `Optuna` - An automatic hyperparameter optimization software framework, particularly designed for machine learning.
+11. `Patchify` - A library to extract patches from images.
+12. `PyTorch` - An open-source machine learning library based on the Torch library.
+13. `TorchVision` - A library from PyTorch that consists of popular datasets, model architectures, and common image
+    transformations for computer vision.
+14. `Transformers` - A library for Natural Language Processing (NLP) using deep learning techniques.
+15. `Datasets` - A library to access and share datasets and evaluation metrics for machine learning.
+16. `Pillow` - A library to add support for opening, manipulating, and saving many different image file formats.
+17. `TensorBoard` - A suite of visualization tools to make training and debugging models easier in TensorFlow.
+18. `Pandas` - A fast, powerful, flexible, and easy-to-use open-source data analysis and data manipulation library.
 
 The packages versions of the libraries used in this series are:
 
@@ -65,6 +77,14 @@ keras==2.10.0
 splitfolders==0.5.1
 keras_tuner==1.4.7
 optuna==3.6.1
+patchify==0.2.3
+torch==2.0.0+cu118
+torchvision==0.15.1+cu118
+transformers==4.32.0
+datasets==2.14.4
+pillow==10.2.0
+tensorboard==2.10.0
+pandas==1.5.3
 ```
 
 To install the required libraries, you can use the following PIP commands:
@@ -80,12 +100,21 @@ pip install keras==2.10.0
 pip install split-folders==0.5.1
 pip install keras-tuner==1.4.7
 pip install optuna==3.6.1
+pip install patchify==0.2.3
+pip install torch==2.0.0+cu118
+pip install torchvision==0.15.1+cu118
+pip install transformers==4.32.0
+pip install datasets==2.14.4
+pip install pillow==10.2.0
+pip install tensorboard==2.10.0
+pip install pandas==1.5.3
 ```
 
 _Disclaimer: The versions of the libraries may change based on updates and releases. However, the code should work
-with the latest versions. Please note that the code has been tested on `Python 3.9.17` and the specified library
-versions on a `Windows 11` machine. It has not been tested on other operating systems or other versions of Python and
-the libraries._
+with the latest versions.
+Please note that the code has been tested on `Python 3.9.17` and the specified library versions on a `Windows 11`
+machine. The GPU specifications are `NVIDIA Quadro M4000` with `CUDA 11.8`.
+It has not been tested on other operating systems or other versions of Python and the libraries._
 
 ## Dataset, Extracted Patches, and Code
 
