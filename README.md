@@ -38,8 +38,7 @@ Link: https://www.youtube.com/playlist?list=PLVrN2LRb7eT3_la39bWC0EP-IW5jNjQ-w
 11. [BE544 Lecture 11 - Hyperparameters Optimization using Keras Tuner and Optuna](https://youtu.be/cdoDTCXaqGg)
 12. [BE544 Lecture 12 - Vision Transformers (ViTs) Explained](https://youtu.be/ICt4ga5RnFM)
 13. [BE544 Lecture 13 - Vision Transformers (ViTs) Implementation and Training from Scratch](https://youtu.be/Xn3jkNomS_E)
-
-... and more to come!
+14. [BE544 Lecture 14 - Pretrained Vision Transformers (ViTs) using Hugging Face](https://youtu.be/vgB51ABLvyc)
 
 ## Programming Language and Libraries
 

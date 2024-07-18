@@ -93,6 +93,7 @@ def PretrainedVisionTransformer(
   # Define the preprocessing functions.
   def _PreprocessTrain(exampleBatch):
     # Convert the images to RGB and apply the transformations.
+    # pixel_values is the tensor that the model expects.
     exampleBatch["pixel_values"] = [
       trainTransforms(image.convert("RGB")) for image in exampleBatch["image"]
     ]
@@ -100,6 +101,7 @@ def PretrainedVisionTransformer(
 
   def _PreprocessVal(exampleBatch):
     # Convert the images to RGB and apply the transformations.
+    # pixel_values is the tensor that the model expects.
     exampleBatch["pixel_values"] = [
       valTransforms(image.convert("RGB")) for image in exampleBatch["image"]
     ]
@@ -109,6 +111,8 @@ def PretrainedVisionTransformer(
     # Stack the pixel values and convert the labels to tensors.
     pixelValues = torch.stack([x["pixel_values"] for x in batch])
     labels = torch.tensor([x["label"] for x in batch])
+
+    # pixel_values and labels are the keys that the model expects.
     return {
       "pixel_values": pixelValues,
       "labels"      : labels,
@@ -121,10 +125,6 @@ def PretrainedVisionTransformer(
     cm = confusion_matrix(references, predictions)
     metrics = CalculateAllMetricsUpdated(cm)
     return metrics
-
-  ds = load_dataset("imagefolder", data_dir=datasetDir)
-  ds = ds["train"]
-  print("DS:", ds)
 
   # Load the feature extractor and define the normalization.
   featureExtractor = ViTImageProcessor.from_pretrained(modelName)
@@ -160,15 +160,24 @@ def PretrainedVisionTransformer(
     ]
   )
 
-  # Split the dataset and set the transformations.
+  # Load the dataset and get the training subset.
+  ds = load_dataset("imagefolder", data_dir=datasetDir)
+  ds = ds["train"]
+  print("DS:", ds)
+
+  # Split the dataset into training and validation.
   data = ds.train_test_split(test_size=testSize)
   trainDS = data["train"]
   valDS = data["val"]
+
   print("Train:", trainDS)
   print("Val:", valDS)
 
+  # Apply the transformations to the training and validation datasets.
   trainDS.set_transform(_PreprocessTrain)
   valDS.set_transform(_PreprocessVal)
+
+  # Define the labels.
   labels = data["train"].features["label"].names
 
   # Define the label mappings.
@@ -336,10 +345,10 @@ bs = configs["batchSize"]
 aug = "Aug" if configs["applyDataAugmentation"] else "NoAug"
 outputDirs = [
   rf"./History/ViT-Base-{bs}-{aug}-P16-224-In21K",
-  rf"./History/ViT-Base-{bs}-{aug}-P16-224",
-  rf"./History/ViT-Large-{bs}-{aug}-P16-224",
-  rf"./History/ViT-Base-{bs}-{aug}-P32-384",
-  rf"./History/ViT-Large-{bs}-{aug}-P32-384",
+  # rf"./History/ViT-Base-{bs}-{aug}-P16-224",
+  # rf"./History/ViT-Large-{bs}-{aug}-P16-224",
+  # rf"./History/ViT-Base-{bs}-{aug}-P32-384",
+  # rf"./History/ViT-Large-{bs}-{aug}-P32-384",
 ]
 
 basePath = r"BACH Updated Extracted\ROIs_0_256_256_32_32"
