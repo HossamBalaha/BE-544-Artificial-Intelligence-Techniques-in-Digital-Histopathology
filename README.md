@@ -1,4 +1,4 @@
-# BE 544 Artificial Intelligence (AI) Techniques in Digital Histopathology (Spring 2026)
+# BE 544 Artificial Intelligence (AI) Techniques in Digital Histopathology (Spring 2026) - Updated
 
 Welcome to the BE 544: Artificial Intelligence (AI) Techniques in Digital Histopathology course.
 
