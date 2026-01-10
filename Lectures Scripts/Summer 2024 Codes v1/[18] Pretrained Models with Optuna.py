@@ -226,7 +226,7 @@ def ObjectiveFunction(trial):
       splitFolder, batchSize, INPUT_SHAPE
     )
 
-    os.makedirs("History", exist_ok=True)
+    os.makedirs("../History", exist_ok=True)
 
     model.fit(
       trainGen,

@@ -222,7 +222,7 @@ testGen = testDataGen.flow_from_directory(
 tuner = ModelTuner()
 
 # Search for the best hyperparameters.
-os.makedirs("History", exist_ok=True)
+os.makedirs("../History", exist_ok=True)
 tuner.search(
   trainGen,
   epochs=MAX_EPOCHS,

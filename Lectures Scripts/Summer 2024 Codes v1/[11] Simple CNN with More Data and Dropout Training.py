@@ -109,7 +109,7 @@ testGen = testDataGen.flow_from_directory(
 model = SimpleCNNDropout(inputShape, optimizer=Adam(), verbose=1)
 
 # Train the model.
-os.makedirs("History", exist_ok=True)
+os.makedirs("../History", exist_ok=True)
 history = model.fit(
   trainGen,
   epochs=epochs,

@@ -1,4 +1,4 @@
-# BE 544 Artificial Intelligence (AI) Techniques in Digital Histopathology (Summer 2024)
+# BE 544 Artificial Intelligence (AI) Techniques in Digital Histopathology (Spring 2026)
 
 Welcome to the BE 544: Artificial Intelligence (AI) Techniques in Digital Histopathology course.
 
@@ -20,101 +20,110 @@ histopathology.
 
 This series is your gateway to the fascinating world of applying AI techniques to digital histopathology.
 
-**Full Playlist**:
+**Recent Playlist**:
+
 Link: https://www.youtube.com/playlist?list=PLVrN2LRb7eT3_la39bWC0EP-IW5jNjQ-w
 
-**Videos**:
+**Earlier Playlists**:
 
-1. [BE544 Lecture 01 - Intro to Histopathology](https://youtu.be/e6RCziIUaB8)
-2. [BE544 Lecture 02 - Intro to Histopathology (Contd.)](https://youtu.be/HcG7DQJgFvQ)
-3. [BE544 Lecture 03 - Intro to QuPath](https://youtu.be/m2rRXoqZWOg)
-4. [BE544 Lecture 04 - Intro to Aperio ImageScope](https://youtu.be/1p0fDFCv34s)
-5. [BE544 Lecture 05 - Working with Annotations and Extracting Tiles](https://youtu.be/GDrhFgeukt8)
-6. [BE544 Lecture 06 - Working with Annotations and Extracting Tiles (Contd.)](https://youtu.be/TX3AUxNZVLU)
-7. [BE544 Lecture 07 - Classification using Convolutional Neural Network](https://youtu.be/lZSJqs9xrJM)
-8. [BE544 Lecture 08 - Classification using Convolutional Neural Network (Contd.)](https://youtu.be/erSsRc7BIQM)
-9. [BE544 Lecture 09 - Classification using Convolutional Neural Network (Contd.)](https://youtu.be/KBZyldoAM48)
-10. [BE544 Lecture 10 - Performance Metrics and Transfer Learning](https://youtu.be/s0_SFBuJ16E)
-11. [BE544 Lecture 11 - Hyperparameters Optimization using Keras Tuner and Optuna](https://youtu.be/cdoDTCXaqGg)
-12. [BE544 Lecture 12 - Vision Transformers (ViTs) Explained](https://youtu.be/ICt4ga5RnFM)
-13. [BE544 Lecture 13 - Vision Transformers (ViTs) Implementation and Training from Scratch](https://youtu.be/Xn3jkNomS_E)
+> Playlist from Spring 2025 (AI-Generated Podcasts):
+> https://www.youtube.com/playlist?list=PLVrN2LRb7eT0VBZqrtSAJQd2mqVtIDJKx
 
-... and more to come!
+> Playlist from Summer 2024 (Recorded): https://www.youtube.com/playlist?list=PLVrN2LRb7eT2KV3YMdXeF2B9dgaN4QF4g
 
 ## Programming Language and Libraries
 
-The programming language used in this series is `Python`, and the primary libraries employed are:
+This project is written in Python. All Python package dependencies required by the lectures and examples are listed in
+the `requirements.txt` file at the repository root.
 
-1. `OpenSlide` - A C library that provides a simple interface to read whole-slide images (also known as virtual slides).
-2. `OpenCV` - An open-source computer vision and machine learning software library.
-3. `NumPy` - A fundamental package for scientific computing with Python.
-4. `Matplotlib` - A comprehensive library for creating static, animated, and interactive visualizations in Python.
-5. `Scikit-learn` - A simple and efficient tool for data mining and data analysis built on NumPy, SciPy, and Matplotlib.
-6. `TensorFlow` - An end-to-end open-source platform for machine learning.
-7. `Keras` - An open-source neural network library written in Python.
-8. `Split Folders` - A simple library to split folders into training, validation, and testing directories.
-9. `Keras Tuner` - A library to perform hyperparameter tuning for Keras models.
-10. `Optuna` - An automatic hyperparameter optimization software framework, particularly designed for machine learning.
-11. `Patchify` - A library to extract patches from images.
-12. `PyTorch` - An open-source machine learning library based on the Torch library.
-13. `TorchVision` - A library from PyTorch that consists of popular datasets, model architectures, and common image
-    transformations for computer vision.
-14. `Transformers` - A library for Natural Language Processing (NLP) using deep learning techniques.
-15. `Datasets` - A library to access and share datasets and evaluation metrics for machine learning.
-16. `Pillow` - A library to add support for opening, manipulating, and saving many different image file formats.
-17. `TensorBoard` - A suite of visualization tools to make training and debugging models easier in TensorFlow.
-18. `Pandas` - A fast, powerful, flexible, and easy-to-use open-source data analysis and data manipulation library.
+You can install the dependencies directly with pip (system / virtualenv / activated conda env):
 
-The packages versions of the libraries used in this series are:
-
-```text
-cv2==4.9.0
-numpy==1.26.4
-matplotlib==3.8.3
-scikit-learn==1.4.1.post1
-tensorflow==2.10.1
-keras==2.10.0
-splitfolders==0.5.1
-keras_tuner==1.4.7
-optuna==3.6.1
-patchify==0.2.3
-torch==2.0.0+cu118
-torchvision==0.15.1+cu118
-transformers==4.32.0
-datasets==2.14.4
-pillow==10.2.0
-tensorboard==2.10.0
-pandas==1.5.3
+```cmd
+pip install -r requirements.txt
 ```
 
-To install the required libraries, you can use the following PIP commands:
+Recommended Python version: Python `3.10` (the materials were developed and tested with Python `3.10.x`, e.g. `3.10.18`)
+on a Windows machine. The code will often work with other Python `3.10.x` builds, but behavior on other Python
+major/minor versions or on other operating systems has not been exhaustively tested.
 
-```
-pip install opencv-python==4.9.*
-pip install opencv-contrib-python==4.9.*
-pip install numpy==1.26.4
-pip install matplotlib==3.8.3
-pip install scikit-learn==1.4.1.post1
-pip install tensorflow==2.10.1
-pip install keras==2.10.0
-pip install split-folders==0.5.1
-pip install keras-tuner==1.4.7
-pip install optuna==3.6.1
-pip install patchify==0.2.3
-pip install torch==2.0.0+cu118
-pip install torchvision==0.15.1+cu118
-pip install transformers==4.32.0
-pip install datasets==2.14.4
-pip install pillow==10.2.0
-pip install tensorboard==2.10.0
-pip install pandas==1.5.3
+## Anaconda Environment Setup (Optional But Recommended)
+
+A helper batch script is provided to automate creating a Conda environment and installing the packages from
+`requirements.txt` on Windows:
+
+Script: `anaconda-tf-environment.bat` (located in the repository root)
+
+Key points about what the script does and how it behaves:
+
+- Defaults: environment name `be544` and Python `3.10` (you may supply a different name and Python version as positional
+  arguments).
+- Supported flags: `--no-gpu` (skip attempting to install CUDA/cuDNN), `--force` (remove any existing environment with
+  the same name before creating), `--no-pause` (do not pause at the end), `--silent` (suppress console output), and
+  `--help`.
+    - The script also accepts `--quiet` as an alias for `--silent`.
+- The script verifies that `conda` is available on PATH; if not, it exits with a message and non-zero status. Run it
+  from an Anaconda Prompt or enable conda in your shell before using the script.
+- It attempts a non-fatal `conda update -n base -c defaults conda` early on; the script continues even if the update
+  fails.
+- Ensures `requirements.txt` exists next to the script; if missing the script exits with an explanatory error.
+- Environment creation and removal are handled via `conda create` / `conda env remove`. Subsequent Python/package
+  commands are executed inside the environment using `conda run -n "<env>"` so `conda init` is not required.
+- If an NVIDIA GPU is detected (presence of `nvidia-smi` on PATH) and `--no-gpu` is not provided, the script attempts to
+  install `cudatoolkit` and `cudnn` into the new environment from `conda-forge`.
+- The script upgrades `pip` inside the created environment and installs the packages from `requirements.txt` using a
+  single pip invocation:
+  `conda run -n "<env>" python -m pip install --progress-bar off -r "requirements.txt"`.
+- Logging: the script writes a log file named `anaconda-tf-environment.log` next to the script and appends sanitized
+  runtime messages. By default the script streams messages to the console and appends the same text to the log; use
+  `--silent` to suppress console output while still writing the log.
+- By default the script pauses at the end so you can read messages; use `--no-pause` for non-interactive or automated
+  runs.
+
+Usage examples (Windows `cmd.exe`):
+
+- Create the default environment named `be544` with Python 3.10 (interactive):
+
+```cmd
+anaconda-tf-environment.bat
 ```
 
-_Disclaimer: The versions of the libraries may change based on updates and releases. However, the code should work
-with the latest versions.
-Please note that the code has been tested on `Python 3.9.17` and the specified library versions on a `Windows 11`
-machine. The GPU specifications are `NVIDIA Quadro M4000` with `CUDA 11.8`.
-It has not been tested on other operating systems or other versions of Python and the libraries._
+- Create a custom environment `myenv` with Python 3.10 (console shows progress):
+
+```cmd
+anaconda-tf-environment.bat myenv 3.10
+```
+
+- Create `myenv` but skip GPU/CUDA installation:
+
+```cmd
+anaconda-tf-environment.bat myenv 3.10 --no-gpu
+```
+
+- Recreate an existing environment (force remove then create):
+
+```cmd
+anaconda-tf-environment.bat myenv 3.10 --force
+```
+
+- Run non-interactively (do not pause at the end):
+
+```cmd
+anaconda-tf-environment.bat myenv 3.10 --no-pause
+```
+
+- Run silently (suppress console output, log still written):
+
+```cmd
+anaconda-tf-environment.bat --silent
+```
+
+If you prefer to set up the environment manually, you can run the following commands in an Anaconda Prompt:
+
+```cmd
+conda create -n be544 python=3.10 -y
+conda activate be544
+pip install -r requirements.txt
+```
 
 ## Dataset, Extracted Patches, and Code
 
