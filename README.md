@@ -22,14 +22,11 @@ This series is your gateway to the fascinating world of applying AI techniques t
 
 **Recent Playlist**:
 
-Link: https://www.youtube.com/playlist?list=PLVrN2LRb7eT3_la39bWC0EP-IW5jNjQ-w
+Link: https://www.youtube.com/playlist?list=PLVrN2LRb7eT2awU1MDVs2vYgnjd32X_im
 
 **Earlier Playlists**:
 
-> Playlist from Spring 2025 (AI-Generated Podcasts):
-> https://www.youtube.com/playlist?list=PLVrN2LRb7eT0VBZqrtSAJQd2mqVtIDJKx
-
-> Playlist from Summer 2024 (Recorded): https://www.youtube.com/playlist?list=PLVrN2LRb7eT2KV3YMdXeF2B9dgaN4QF4g
+> Playlist from Summer 2024 (Recorded): https://www.youtube.com/playlist?list=PLVrN2LRb7eT3_la39bWC0EP-IW5jNjQ-w
 
 ## Programming Language and Libraries
 
