@@ -10,10 +10,6 @@
 
 # Import the OpenSlide Python wrapper and OpenCV for image operations.
 import openslide, cv2
-# Import NumPy for array manipulations.
-import numpy as np
-# Import ElementTree for parsing XML annotation files.
-import xml.etree.ElementTree as ET
 # Import matplotlib.pyplot for plotting results.
 import matplotlib.pyplot as plt
 # Import the helper function to extract BACH annotations from XML.

@@ -10,8 +10,6 @@
 
 # Import the openslide Python wrapper for accessing whole-slide images.
 import openslide
-# Import the XML ElementTree module for parsing annotation XML files.
-import xml.etree.ElementTree as ET
 # Import NumPy for numerical operations.
 import numpy as np
 # Import matplotlib.pyplot for plotting images and drawing overlays.
