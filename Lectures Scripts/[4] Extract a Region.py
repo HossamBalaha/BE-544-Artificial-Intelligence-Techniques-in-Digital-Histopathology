@@ -62,5 +62,5 @@ plt.show()
 # Close the current figure and free its associated resources.
 plt.close()
 
-# Close the SVS file to free associated resources.
+# Close the SVS file to free-associated resources.
 slide.close()
