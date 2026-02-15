@@ -417,11 +417,13 @@ def ExtractRegionTiles(
   xProgressBar = tqdm.tqdm(
     range(regionStartX, regionStartX + regionWidth, width - overlapWidth),
     desc="Processing X-axis",
+    position=0,
   )
   yProgressBar = tqdm.tqdm(
     range(regionStartY, regionStartY + regionHeight, height - overlapHeight),
     desc="Processing Y-axis",
     leave=False,
+    position=1,
   )
   for x in xProgressBar:
     for y in yProgressBar:
@@ -540,4 +542,5 @@ def ExtractRegionTiles(
         imgName = f"{category}_{x}_{y}_{width}x{height}_{overlapWidth}x{overlapHeight}"
         plt.tight_layout()
         plt.savefig(os.path.join(plotsDir, f"{imgName}.png"), dpi=300, bbox_inches="tight")
-        plt.close()
+        plt.close("all")
+        plt.gcf().clear()

@@ -33,7 +33,7 @@ slide = openslide.OpenSlide(svsFile)
 # Extract BACH annotations from the XML file at the base level.
 anList = ExtractBACHAnnotationsFromXML(xmlFile, verbose=False)
 
-for region in anList:
+for region in anList[14:]:
   # Extract the region tiles from the whole-slide image based on the selected annotation and specified parameters.
   ExtractRegionTiles(
     slide,  # OpenSlide object representing the whole-slide image.
