@@ -42,3 +42,4 @@ simpleitk==2.5.*
 PyPDF2==3.0.1
 shap==0.48.0
 lime==0.2.*
+shapely==2.1.*
