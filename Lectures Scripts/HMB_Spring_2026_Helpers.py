@@ -500,6 +500,9 @@ def ExtractRegionTiles(
         # Ensure the padded mask tile is of type uint8 for proper masking operations.
         levelMaskTile = levelMaskTile.astype(np.uint8)
 
+        if (levelMaskTile.shape[0] != levelTile.shape[0]) or (levelMaskTile.shape[1] != levelTile.shape[1]):
+          break
+
         # Compute the masked ROI by applying the binary mask to the tile image using a bitwise AND.
         levelROI = cv2.bitwise_and(levelTile, levelTile, mask=levelMaskTile)
 
