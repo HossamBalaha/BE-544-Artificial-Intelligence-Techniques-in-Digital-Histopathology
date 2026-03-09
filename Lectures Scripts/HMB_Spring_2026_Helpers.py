@@ -190,11 +190,11 @@ def ExtractWSIRegion(slide, region):
 
 
 def ExtractPyramidalWSITiles(
-  slide,
-  x=0,
-  y=0,
-  width=512,
-  height=512,
+    slide,
+    x=0,
+    y=0,
+    width=512,
+    height=512,
 ):
   # Get the number of pyramid levels in the slide.
   slideLevels = slide.level_count
@@ -350,13 +350,19 @@ def PrepareAnnotationsForLevel(annotation, dFactor=1.0):
 
 
 def ExtractRegionTiles(
-  slide,
-  region,
-  width=512,
-  height=512,
-  overlapWidth=0,
-  overlapHeight=0,
-  storageDir=None,
+    slide,
+    region,
+    width=512,
+    height=512,
+    overlapWidth=0,
+    overlapHeight=0,
+    storageDir=None,
+    maxTiles=None,
+    addPlots=True,
+    prefix="",
+    blackRatioThreshold=0.90,
+    removeBackgroundTiles=True,
+    convertBlackToWhite=True,
 ):
   r'''
   Extract tiles from a specified region of a whole-slide image (WSI) across all pyramid levels,
@@ -370,15 +376,23 @@ def ExtractRegionTiles(
     height (int): The height of the tiles to extract in pixels (default is 512).
     overlapWidth (int): The horizontal overlap between tiles in pixels (default is 0).
     overlapHeight (int): The vertical overlap between tiles in pixels (default is 0).
-    storageDir (str or None): The directory path to save the extracted tiles, masks, and ROIs.
-      If None, no files will be saved (default is None).
+    storageDir (str or None): The directory path to save the extracted tiles, masks, and ROIs. If None, no files will be saved (default is None).
+    maxTiles (int or None): The maximum number of tiles to extract for the region. If None, all tiles will be extracted (default is None).
+    addPlots (bool): Whether to create and save plots visualizing the tiles, masks, and ROIs (default is True).
+    prefix (str): A string prefix to add to saved file names for organization (default is an empty string).
+    blackRatioThreshold (float): The maximum allowed ratio of black pixels in a tile to be considered valid (default is 0.90). Tiles with a higher ratio will be skipped.
+    removeBackgroundTiles (bool): Whether to skip tiles that are considered background based on the black pixel ratio (default is True).
+    convertBlackToWhite (bool): Whether to convert black pixels to white in the ROI before background analysis to avoid skewing metrics (default is True).
   '''
 
   # Create output directories when a storage directory is provided.
   if (storageDir is not None):
-    # Compose the plots directory path and ensure it exists.
-    plotsDir = os.path.join(storageDir, "Plots")
-    os.makedirs(plotsDir, exist_ok=True)
+    if (addPlots):
+      # Compose the plots directory path and ensure it exists.
+      plotsDir = os.path.join(storageDir, "Plots")
+      os.makedirs(plotsDir, exist_ok=True)
+    else:
+      plotsDir = None
     # Compose the tiles directory path and ensure it exists.
     tilesDir = os.path.join(storageDir, "Tiles")
     os.makedirs(tilesDir, exist_ok=True)
@@ -425,6 +439,8 @@ def ExtractRegionTiles(
     leave=False,
     position=1,
   )
+  # Initialize a counter to keep track of the number of tiles processed (optional, can be used for maxTiles limit).
+  counter = 0
   for x in xProgressBar:
     for y in yProgressBar:
       startX = x - regionStartX
@@ -440,6 +456,7 @@ def ExtractRegionTiles(
       )
       # Close the temporary figure to free-associated resources.
       plt.close(fig1)
+      plt.gcf().clear()  # Clear the current figure to reset the plotting state for the next iteration.
 
       # Create a shapely polygon for the base-level annotation to test intersection with the tile.
       baseCoordsPolygon = Polygon(mappingData[0]["ShiftedCoords"])
@@ -456,8 +473,10 @@ def ExtractRegionTiles(
         continue
 
       # Prepare a plotting figure if storage is enabled so we can visualize results.
-      if (storageDir is not None):
+      if (addPlots and storageDir is not None):
         plt.figure(figsize=(12, 3 * slide.level_count))
+
+      whatToStore = {}
 
       # Iterate over each pyramid level to crop masks and produce ROIs for saving/plotting.
       for level in range(slide.level_count):
@@ -505,42 +524,193 @@ def ExtractRegionTiles(
         if ((levelMaskTile.shape[0] != levelTile.shape[0]) or (levelMaskTile.shape[1] != levelTile.shape[1])):
           # Close the created figure.
           plt.close()
+          whatToStore = {}
+          break
+
+        blackRatio = np.sum(levelMaskTile == 0) / levelMaskTile.size
+        if ((level == 0) and (blackRatio > blackRatioThreshold)):
+          # Close the created figure.
+          plt.close()
+          whatToStore = {}
           break
 
         # Compute the masked ROI by applying the binary mask to the tile image using a bitwise AND.
         levelROI = cv2.bitwise_and(levelTile, levelTile, mask=levelMaskTile)
 
-        # Save tile, mask, and ROI images to disk when storage is enabled.
-        if (storageDir is not None):
-          imgName = f"{category}_{level}_{x}_{y}_{width}x{height}_{overlapWidth}x{overlapHeight}"
-          cv2.imwrite(os.path.join(tilesDir, f"Level_{level}", f"{imgName}.jpg"), levelTile)
-          cv2.imwrite(os.path.join(masksDir, f"Level_{level}", f"{imgName}.jpg"), levelMaskTile)
-          cv2.imwrite(os.path.join(roisDir, f"Level_{level}", f"{imgName}.jpg"), levelROI)
+        if (convertBlackToWhite):
+          # Convert black pixels to white in the ROI.
+          levelROI[levelROI == 0] = 255
 
-        # When storage is enabled, plot the tile, mask, overlay, and ROI for visual inspection.
-        if (storageDir is not None):
-          plt.subplot(slide.level_count, 4, 1 + level * 4)
-          plt.imshow(levelTile)
-          plt.title("Tile")
-          plt.axis("off")
-          plt.subplot(slide.level_count, 4, 2 + level * 4)
-          plt.imshow(levelMaskTile, cmap="gray")
-          plt.title("Mask Tile")
-          plt.axis("off")
-          plt.subplot(slide.level_count, 4, 3 + level * 4)
-          plt.imshow(levelTile)
-          plt.imshow(levelMaskTile, alpha=0.5, cmap="jet")
-          plt.title("Tile with Annotation Overlay")
-          plt.axis("off")
-          plt.subplot(slide.level_count, 4, 4 + level * 4)
-          plt.imshow(levelROI)
-          plt.title("ROI (Masked Tile)")
-          plt.axis("off")
+        if ((level == 0) and (removeBackgroundTiles)):
+          isBackground, metrics = IsBackgroundTile(
+            None,
+            image=levelROI.copy(),
+            entropyThreshold=5.5,
+            colorVarianceThreshold=1500,
+            tissueAreaThreshold=0.20,
+            convertBlackToWhite=convertBlackToWhite,
+          )
+          if (isBackground):
+            # Close the created figure.
+            plt.close()
+            whatToStore = {}
+            break
+
+        whatToStore[level] = {
+          "Tile": levelTile,
+          "Mask": levelMaskTile,
+          "ROI" : levelROI,
+        }
+
+      # Check if we have valid data to store for all levels before attempting to save or plot.
+      if (whatToStore):
+        for level in range(slide.level_count):
+          levelTile = whatToStore[level]["Tile"]
+          levelMaskTile = whatToStore[level]["Mask"]
+          levelROI = whatToStore[level]["ROI"]
+
+          # Save tile, mask, and ROI images to disk when storage is enabled.
+          if (storageDir is not None):
+            imgName = f"{level}_{x}_{y}_{width}x{height}_{overlapWidth}x{overlapHeight}"
+            if (prefix):
+              imgName = f"{prefix}_{imgName}"
+            os.makedirs(os.path.join(tilesDir, f"Level_{level}", category), exist_ok=True)
+            os.makedirs(os.path.join(masksDir, f"Level_{level}", category), exist_ok=True)
+            os.makedirs(os.path.join(roisDir, f"Level_{level}", category), exist_ok=True)
+            cv2.imwrite(os.path.join(tilesDir, f"Level_{level}", category, f"{imgName}.jpg"), levelTile)
+            cv2.imwrite(os.path.join(masksDir, f"Level_{level}", category, f"{imgName}.jpg"), levelMaskTile)
+            cv2.imwrite(os.path.join(roisDir, f"Level_{level}", category, f"{imgName}.jpg"), levelROI)
+
+          # When storage is enabled, plot the tile, mask, overlay, and ROI for visual inspection.
+          if (addPlots and storageDir is not None):
+            plt.subplot(slide.level_count, 4, 1 + level * 4)
+            plt.imshow(levelTile)
+            plt.title("Tile")
+            plt.axis("off")
+            plt.subplot(slide.level_count, 4, 2 + level * 4)
+            plt.imshow(levelMaskTile, cmap="gray")
+            plt.title("Mask Tile")
+            plt.axis("off")
+            plt.subplot(slide.level_count, 4, 3 + level * 4)
+            plt.imshow(levelTile)
+            plt.imshow(levelMaskTile, alpha=0.5, cmap="jet")
+            plt.title("Tile with Annotation Overlay")
+            plt.axis("off")
+            plt.subplot(slide.level_count, 4, 4 + level * 4)
+            plt.imshow(levelROI)
+            plt.title("ROI (Masked Tile)")
+            plt.axis("off")
+      else:
+        # print(f"Tile at x: {x}, y: {y} has invalid mask or ROI. Skipping storage and plotting.")
+        continue
 
       # When storage is enabled, finalize and save the plotted figure for the current tile.
-      if (storageDir is not None):
-        imgName = f"{category}_{x}_{y}_{width}x{height}_{overlapWidth}x{overlapHeight}"
+      if (addPlots and storageDir is not None):
+        imgName = f"{x}_{y}_{width}x{height}_{overlapWidth}x{overlapHeight}"
+        if (prefix):
+          imgName = f"{prefix}_{imgName}"
+        os.makedirs(os.path.join(plotsDir, category), exist_ok=True)
         plt.tight_layout()
-        plt.savefig(os.path.join(plotsDir, f"{imgName}.png"), dpi=300, bbox_inches="tight")
+        plt.savefig(os.path.join(plotsDir, category, f"{imgName}.png"), dpi=300, bbox_inches="tight")
         plt.close("all")
         plt.gcf().clear()
+
+      counter += 1
+      if ((maxTiles is not None) and (counter >= maxTiles)):
+        print(f"Reached maximum tile limit of {maxTiles}. Stopping extraction.")
+        return
+
+
+def IsBackgroundTile(
+    imagePath,  # Path to the tile image to analyze for background detection.
+    image=None,  # Optional pre-loaded image as a NumPy array (H,W,3) uint8. If provided, imagePath will be ignored.
+    # Threshold for Shannon entropy to detect uniformity. Adjust based on the expected variability in tissue tiles.
+    entropyThreshold=5.5,
+    # Threshold for color variance to detect lack of color diversity. Adjust based on the expected variability in tissue tiles.
+    colorVarianceThreshold=1500,
+    tissueAreaThreshold=0.20,  # Minimum ratio of tissue area to total area to consider the tile as non-background.
+    convertBlackToWhite=True,  # Convert black pixels to white before analysis to avoid skewing the metrics.
+):
+  '''
+  Detect background tiles using multiple criteria suitable for non-black backgrounds.
+
+  Parameters:
+    imagePath: Path to the tile image.
+    image: Optional pre-loaded image as a NumPy array (H,W,3) uint8. If provided, imagePath will be ignored.
+    entropyThreshold: Threshold for Shannon entropy to detect uniformity.
+    colorVarianceThreshold: Threshold for color variance to detect lack of color diversity.
+    tissueAreaThreshold: Threshold for the ratio of tissue area to total area.
+    convertBlackToWhite: Whether to convert black pixels to white before analysis (default is True).
+
+  Returns:
+    bool: True if the tile is considered background, False otherwise.
+    dict: A dictionary containing the computed metrics for debugging and analysis.
+  '''
+
+  import cv2
+  import numpy as np
+  from skimage.filters import threshold_otsu
+  from skimage.measure import shannon_entropy
+
+  if (image is None):
+    if (not os.path.exists(imagePath)):
+      raise FileNotFoundError(f"Image file not found: {imagePath}")
+    image = cv2.imread(imagePath)
+
+  # Convert black pixels to white to handle non-black backgrounds (e.g., white background in H&E slides).
+  if (image is None):
+    raise ValueError(f"Failed to load image from path: {imagePath}")
+
+  if (convertBlackToWhite):
+    image[image == 0] = 255
+
+  # Convert to different color spaces for analysis.
+  gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+  hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+  lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+
+  # 1. ENTROPY ANALYSIS (detects uniformity).
+  entropyValue = shannon_entropy(gray)
+
+  # 2. COLOR VARIANCE (H&E has characteristic pink/purple colors).
+  colorVariance = np.var(image)
+
+  # 3. TISSUE DETECTION using Otsu thresholding.
+  # Invert since tissue is typically darker than background.
+  thresh = threshold_otsu(gray)
+  binary = gray < thresh
+  tissueRatio = np.sum(binary) / binary.size
+
+  # 4. SATURATION CHECK (H&E stained tissue has color saturation).
+  saturation = hsv[:, :, 1]
+  meanSaturation = np.mean(saturation)
+
+  # 5. TEXTURE ANALYSIS (Laplacian variance).
+  laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+  textureVariance = np.var(laplacian)
+
+  # Decision logic - tile is background if MOST criteria indicate background.
+  backgroundScore = 0
+
+  if (entropyValue < entropyThreshold):
+    backgroundScore += 1
+  if (colorVariance < colorVarianceThreshold):
+    backgroundScore += 1
+  if (tissueRatio < tissueAreaThreshold):
+    backgroundScore += 1
+  if (meanSaturation < 20):  # Low saturation = grayscale/white background.
+    backgroundScore += 1
+  if (textureVariance < 100):  # Low texture = smooth background.
+    backgroundScore += 1
+
+  # Consider background if 3 or more criteria agree.
+  isBackground = backgroundScore >= 3
+
+  return isBackground, {
+    'entropy'        : entropyValue,
+    'colorVariance'  : colorVariance,
+    'tissueRatio'    : tissueRatio,
+    'meanSaturation' : meanSaturation,
+    'textureVariance': textureVariance,
+    'backgroundScore': backgroundScore,
+  }

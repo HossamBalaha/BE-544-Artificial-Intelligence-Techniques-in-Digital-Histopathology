@@ -151,7 +151,7 @@ history = model.fit(
   callbacks=[
     # Save the best model by validation categorical accuracy during training.
     ModelCheckpoint(
-      "History/SimpleCNN.h5", save_best_only=True,
+      "History/SimpleCNN.keras", save_best_only=True,
       save_weights_only=False, monitor="val_categorical_accuracy",
       verbose=1,
     ),
@@ -168,7 +168,7 @@ history = model.fit(
 )
 
 # Load the best saved model weights from training.
-model.load_weights("History/SimpleCNN.h5")
+model.load_weights("History/SimpleCNN.keras")
 
 # Evaluate the model on both training and test sets and print metrics.
 for (_x, _y) in [(xTrain, yCatTrain), (xTest, yCatTest)]:
@@ -200,6 +200,7 @@ plt.tight_layout()
 # Save the training figure for reference.
 plt.savefig("History/SimpleCNN.png")
 plt.show()
+plt.close()
 
 # Compute predictions on the test set and display a confusion matrix.
 yCatPred = model.predict(xTest, batch_size=batchSize, verbose=0)
@@ -209,3 +210,4 @@ cm = confusion_matrix(yTrue, yPred)
 disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=enc.classes_)
 disp.plot()
 plt.show()
+plt.close()
