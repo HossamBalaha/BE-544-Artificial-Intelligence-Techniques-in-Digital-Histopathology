@@ -714,3 +714,91 @@ def IsBackgroundTile(
     'textureVariance': textureVariance,
     'backgroundScore': backgroundScore,
   }
+
+
+def CalculateAllMetrics(cm):
+  r'''
+  Calculate a variety of classification metrics from a confusion matrix.
+
+  This function computes per-class true positives (TP), false positives (FP),
+  false negatives (FN) and true negatives (TN) from the provided confusion
+  matrix and returns a dictionary containing macro-, micro- and
+  class-weighted-averaged precision, recall, F1, accuracy and specificity.
+
+  Parameters:
+    cm (numpy.ndarray): Confusion matrix of shape (n_classes, n_classes).
+      Rows correspond to ground-truth classes and columns to predicted
+      classes. Each element cm[i, j] is the count of samples whose true
+      label is i and predicted label is j.
+
+  Returns:
+    dict: A dictionary with the following keys (each value is a scalar):
+      - "Macro Precision", "Macro Recall", "Macro F1", "Macro Accuracy", "Macro Specificity"
+      - "Micro Precision", "Micro Recall", "Micro F1", "Micro Accuracy", "Micro Specificity"
+      - "Weighted Precision", "Weighted Recall", "Weighted F1", "Weighted Accuracy", "Weighted Specificity"
+
+  Notes:
+    - Macro averaging computes metrics independently per class and then
+      averages them (treats all classes equally).
+    - Micro averaging aggregates contributions of all classes to compute
+      the metrics (equivalent to computing metrics on the flattened
+      set of predictions and labels).
+    - Weighted averaging uses the number of true samples per class as
+      weights when averaging per-class metrics.
+    - Division by zero can occur for degenerate confusion matrices; in
+      such cases NumPy will produce NaN or inf values. Callers may want
+      to sanitize the confusion matrix or handle NaNs after receiving
+      the results.
+  '''
+
+  # Calculate TP, TN, FP, FN.
+  TP = np.diag(cm)
+  FP = np.sum(cm, axis=0) - TP
+  FN = np.sum(cm, axis=1) - TP
+  TN = np.sum(cm) - (TP + FP + FN)
+
+  results = {}
+
+  # Using macro averaging.
+  precision = np.mean(TP / (TP + FP))
+  recall = np.mean(TP / (TP + FN))
+  f1 = 2 * precision * recall / (precision + recall)
+  accuracy = np.mean(TP + TN) / np.sum(confMatrix)
+  specificity = np.mean(TN / (TN + FP))
+
+  results["Macro Precision"] = precision
+  results["Macro Recall"] = recall
+  results["Macro F1"] = f1
+  results["Macro Accuracy"] = accuracy
+  results["Macro Specificity"] = specificity
+
+  # Using micro averaging.
+  precision = np.sum(TP) / np.sum(TP + FP)
+  recall = np.sum(TP) / np.sum(TP + FN)
+  f1 = 2.0 * precision * recall / (precision + recall)
+  accuracy = np.sum(TP + TN) / np.sum(TP + TN + FP + FN)
+  specificity = np.sum(TN) / np.sum(TN + FP)
+
+  results["Micro Precision"] = precision
+  results["Micro Recall"] = recall
+  results["Micro F1"] = f1
+  results["Micro Accuracy"] = accuracy
+  results["Micro Specificity"] = specificity
+
+  # Using weighted averaging.
+  samples = np.sum(cm, axis=1)
+  weights = samples / np.sum(cm)
+
+  precision = np.sum(TP / (TP + FP) * weights)
+  recall = np.sum(TP / (TP + FN) * weights)
+  f1 = 2.0 * precision * recall / (precision + recall)
+  accuracy = np.sum((TP + TN) * weights) / np.sum(confMatrix)
+  specificity = np.sum(TN / (TN + FP) * weights)
+
+  results["Weighted Precision"] = precision
+  results["Weighted Recall"] = recall
+  results["Weighted F1"] = f1
+  results["Weighted Accuracy"] = accuracy
+  results["Weighted Specificity"] = specificity
+
+  return results

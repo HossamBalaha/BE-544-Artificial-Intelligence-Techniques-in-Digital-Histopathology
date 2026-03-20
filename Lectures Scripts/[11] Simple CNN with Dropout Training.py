@@ -8,7 +8,7 @@
 # Permissions and Citation: Refer to the README file.
 '''
 
-import os, cv2
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt

@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import tensorflow as tf
 from tensorflow.keras.layers import *
 from tensorflow.keras.models import *
@@ -21,7 +20,10 @@ from tensorflow.keras.optimizers import *
 from tensorflow.keras.losses import *
 from tensorflow.keras.metrics import *
 from tensorflow.keras.callbacks import *
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.applications import *
+from HMB_Spring_2026_Helpers import CalculateAllMetrics
 
 # Print TensorFlow version for transparency.
 print("TensorFlow Version:", tf.__version__)
@@ -29,36 +31,36 @@ print("TensorFlow Version:", tf.__version__)
 print("Num GPUs Available:", len(tf.config.list_physical_devices("GPU")))
 
 
-def SimpleCNNDropout(inputShape, noOfClasses=4, optimizer=Adam(), verbose=0):
-  # Build a sequential convolutional neural network architecture.
-  model = Sequential(
-    [  # First convolutional block: 32 filters with 3x3 kernel, stride 2, ReLU activation, and same padding.
-      Conv2D(32, kernel_size=(3, 3), strides=(2, 2), activation="relu", padding="same", input_shape=inputShape),
-      # Max pooling to reduce spatial dimensions.
-      MaxPooling2D(pool_size=(2, 2)),
-      # Second convolutional block: 64 filters.
-      Conv2D(64, kernel_size=(3, 3), strides=(2, 2), activation="relu", padding="same"),
-      # Additional pooling.
-      MaxPooling2D(pool_size=(2, 2)),
-      # Third convolutional block: 128 filters.
-      Conv2D(128, kernel_size=(3, 3), strides=(2, 2), activation="relu", padding="same"),
-      # Final pooling before classifier.
-      MaxPooling2D(pool_size=(2, 2)),
-      # Flatten feature maps to a 1D vector for the dense layers.
-      Flatten(),
-      # Apply dropout for strong regularization.
-      Dropout(0.5),
-      # Dense hidden layer with 128 units and ReLU activation.
-      Dense(128, activation="relu"),
-      # Additional dropout to reduce overfitting.
-      Dropout(0.5),
-      # Dense hidden layer with 64 units and ReLU activation.
-      Dense(64, activation="relu"),
-      # Output layer for C-class classification with softmax activation.
-      Dense(noOfClasses, activation="softmax") if (noOfClasses > 2) else Dense(1, activation="sigmoid")
-    ])
+def PretrainedCNN(baseModel, inputShape, noOfClasses=4, optimizer=Adam(), verbose=0):
+  if (not baseModel):
+    # Create the model.
+    baseModel = MobileNetV2(
+      # Exclude default classification head; we'll add a custom head.
+      include_top=False,
+      # Initialize with ImageNet weights.
+      weights="imagenet",
+      # Input image shape for the model.
+      input_shape=inputShape,
+    )
 
-  # Compile the model with the provided optimizer, categorical crossentropy loss, and common metrics.
+  for layer in baseModel.layers:
+    # Freeze the pretrained base during initial fine-tuning.
+    layer.trainable = False
+
+  model = Sequential([
+    # Pretrained convolutional backbone.
+    baseModel,
+    # Aggregate spatial features into a vector.
+    GlobalAveragePooling2D(),
+    # Fully-connected layers for task-specific learning.
+    Dense(128, activation="relu"),
+    Dropout(0.5),
+    Dense(64, activation="relu"),
+    Dropout(0.5),
+    # Output layer: softmax over 4 classes.
+    Dense(noOfClasses, activation="softmax") if (noOfClasses > 2) else Dense(1, activation="sigmoid"),
+  ])
+
   model.compile(
     optimizer=optimizer,
     # You can use "sparse_categorical_crossentropy" if your labels are integers instead of one-hot encoded.
@@ -155,7 +157,7 @@ batchSize = 64
 # Number of epochs to train.
 epochs = 200
 # Define the output directory for saving models and logs.
-outputDir = "History/Simple CNN with Data Augmentation"
+outputDir = "History/Pretrained Models Fine-Tuning Training"
 # Create the output directory if it does not exist.
 os.makedirs(outputDir, exist_ok=True)
 
@@ -238,8 +240,17 @@ for text, gen in [("Training", trainGen), ("Validation", valGen), ("Testing", te
   # plt.show()  # Uncomment this line if you want to see the plot during execution.
   plt.close()  # Close the figure to free memory.
 
-# Create the CNN model with dropout using the defined input shape.
-model = SimpleCNNDropout(
+baseModel = MobileNetV2(
+  # Exclude default classification head; we'll add a custom head.
+  include_top=False,
+  # Initialize with ImageNet weights.
+  weights="imagenet",
+  # Input image shape for the model.
+  input_shape=inputShape,
+)
+
+model = PretrainedCNN(
+  baseModel,
   inputShape,  # Input shape for the model (height, width, channels).
   optimizer=Adam(),  # Use Adam optimizer for training.
   noOfClasses=noOfClasses,  # Set the number of output classes.
@@ -334,3 +345,11 @@ plt.tight_layout()  # Adjust layout to prevent overlap of labels and titles.
 plt.savefig(f"{outputDir}/ConfusionMatrix.png")
 # plt.show()  # Uncomment this line if you want to see the plot during execution.
 plt.close()
+
+# Calculate all metrics.
+print("Confusion Matrix:")
+cm = confusion_matrix(yTrue, yPred)
+print("Performance Metrics:")
+results = CalculateAllMetrics(cm)
+for key, value in results.items():
+  print(f"{key}:", value)
