@@ -15,8 +15,9 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from tensorflow.keras.callbacks import *
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from HMB_Spring_2026_Helpers import PretrainedModelOptuna
+from HMB_Spring_2026_Helpers import CalculateAllMetrics, PretrainedModelOptuna
 
 # Ignore warnings.
 warnings.filterwarnings("ignore")
