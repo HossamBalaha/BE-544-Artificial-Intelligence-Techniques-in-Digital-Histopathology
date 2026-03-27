@@ -8,22 +8,15 @@
 # Permissions and Citation: Refer to the README file.
 '''
 
-import os, warnings
+import os, warnings, optuna
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
 import tensorflow as tf
-from tensorflow.keras.layers import *
-from tensorflow.keras.models import *
-from tensorflow.keras.optimizers import *
-from tensorflow.keras.losses import *
-from tensorflow.keras.metrics import *
+import matplotlib.pyplot as plt
 from tensorflow.keras.callbacks import *
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.model_selection import train_test_split
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.applications import *
-from HMB_Spring_2026_Helpers import CalculateAllMetrics
+from HMB_Spring_2026_Helpers import PretrainedModelOptunaObjectiveFunction
 
 # Ignore warnings.
 warnings.filterwarnings("ignore")
@@ -31,61 +24,6 @@ warnings.filterwarnings("ignore")
 print("TensorFlow Version:", tf.__version__)
 # Print number of visible GPUs.
 print("Num GPUs Available:", len(tf.config.list_physical_devices("GPU")))
-
-
-def PretrainedCNN(baseModel, inputShape, noOfClasses=4, optimizer=Adam(), verbose=0):
-  if (not baseModel):
-    # Create the model.
-    baseModel = MobileNetV2(
-      # Exclude default classification head; we'll add a custom head.
-      include_top=False,
-      # Initialize with ImageNet weights.
-      weights="imagenet",
-      # Input image shape for the model.
-      input_shape=inputShape,
-    )
-
-  for layer in baseModel.layers:
-    # Freeze the pretrained base during initial fine-tuning.
-    layer.trainable = False
-
-  model = Sequential([
-    # Pretrained convolutional backbone.
-    baseModel,
-    # Aggregate spatial features into a vector.
-    GlobalAveragePooling2D(),
-    # Fully-connected layers for task-specific learning.
-    Dense(128, activation="relu"),
-    Dropout(0.5),
-    Dense(64, activation="relu"),
-    Dropout(0.5),
-    # Output layer: softmax over 4 classes.
-    Dense(noOfClasses, activation="softmax") if (noOfClasses > 2) else Dense(1, activation="sigmoid"),
-  ])
-
-  model.compile(
-    optimizer=optimizer,
-    # You can use "sparse_categorical_crossentropy" if your labels are integers instead of one-hot encoded.
-    loss="categorical_crossentropy" if (noOfClasses > 2) else "binary_crossentropy",
-    metrics=[
-      CategoricalAccuracy() if (noOfClasses > 2) else BinaryAccuracy(),
-      Precision(),
-      Recall(),
-      AUC(),
-      TruePositives(name="TP"),
-      TrueNegatives(name="TN"),
-      FalsePositives(name="FP"),
-      FalseNegatives(name="FN"),
-    ],
-  )
-
-  # Optionally print the model summary when verbose is enabled.
-  if (verbose):
-    model.summary()
-
-  # Return the compiled Keras model.
-  return model
-
 
 # ======================================================================== #
 # RELATED TO BreakHist DATASET.
@@ -164,12 +102,11 @@ print(f"Testing set size: {len(testDF)}")
 
 # Define the network input image shape (H, W, C).
 inputShape = (256, 256, 3)
-# Training batch size.
-batchSize = 64
-# Number of epochs to train.
-epochs = 200
+# Define the maximum number of epochs for training during hyperparameter tuning.
+maxEpochs = 100
+
 # Define the output directory for saving models and logs.
-outputDir = "History/Pretrained Models Fine-Tuning Training"
+outputDir = f"History/Pretrained Models with Optuna {whichCategory} {whichMagnification}"
 # Create the output directory if it does not exist.
 os.makedirs(outputDir, exist_ok=True)
 
@@ -192,7 +129,6 @@ trainGen = trainDataGen.flow_from_dataframe(
   x_col="image_path",  # Column in DataFrame that contains image file paths.
   y_col="label",  # Column in DataFrame that contains class labels.
   target_size=inputShape[:2],  # Resize images to match model input size.
-  batch_size=batchSize,  # Batch size for training.
   class_mode="categorical",  # Use one-hot encoded labels for training.
   shuffle=True,  # Shuffle training data to improve generalization.
 )
@@ -208,7 +144,6 @@ valGen = valDataGen.flow_from_dataframe(
   x_col="image_path",  # Column in DataFrame that contains image file paths.
   y_col="label",  # Column in DataFrame that contains class labels.
   target_size=inputShape[:2],  # Resize to model input size.
-  batch_size=batchSize,  # Batch size for validation.
   class_mode="categorical",  # Use one-hot encoded labels for validation.
   shuffle=True,  # Shuffle validation data (optional, can be False if order matters for metrics).
 )
@@ -224,7 +159,6 @@ testGen = testDataGen.flow_from_dataframe(
   x_col="image_path",  # Column in DataFrame that contains image file paths.
   y_col="label",  # Column in DataFrame that contains class labels.
   target_size=inputShape[:2],  # Resize to model input size.
-  batch_size=batchSize,  # Batch size for testing (can be larger since no backprop).
   class_mode="categorical",  # Use one-hot encoded labels for evaluation.
   shuffle=False,  # Do not shuffle test data to maintain order for metrics like confusion matrix.
 )
@@ -252,116 +186,46 @@ for text, gen in [("Training", trainGen), ("Validation", valGen), ("Testing", te
   # plt.show()  # Uncomment this line if you want to see the plot during execution.
   plt.close()  # Close the figure to free memory.
 
-baseModel = MobileNetV2(
-  # Exclude default classification head; we'll add a custom head.
-  include_top=False,
-  # Initialize with ImageNet weights.
-  weights="imagenet",
-  # Input image shape for the model.
-  input_shape=inputShape,
+# Search for the best hyperparameters.
+study = optuna.create_study(
+  direction="maximize",  # We want to maximize the categorical accuracy.
+  study_name="PretrainedOptuna",  # This is the name of the study.
+  load_if_exists=True,  # This will load the study if it exists.
+  storage=f"sqlite:///{outputDir}/PretrainedOptuna.db",  # This is the database file.
 )
 
-model = PretrainedCNN(
-  baseModel,
-  inputShape,  # Input shape for the model (height, width, channels).
-  optimizer=Adam(),  # Use Adam optimizer for training.
-  noOfClasses=noOfClasses,  # Set the number of output classes.
-  verbose=1,  # Print model summary when creating the model.
+# Create an instance of the objective function for Optuna, which will be called for each trial to
+# evaluate the model with different hyperparameters.
+objFunc = PretrainedModelOptunaObjectiveFunction(
+  trainGen=trainGen,  # Training data generator.
+  valGen=valGen,  # Validation data generator.
+  testGen=testGen,  # Testing data generator for final evaluation.
+  inputShape=inputShape,  # Input shape for the model.
+  noOfClasses=noOfClasses,  # Number of classes in the dataset.
+  maxEpochs=maxEpochs,  # Maximum number of epochs for training.
 )
 
-# Train the model with several useful callbacks.
-history = model.fit(
-  trainGen,  # Training data generator.
-  epochs=epochs,  # Total number of epochs.
-  batch_size=batchSize,  # Batch size (note generators already yield batches).
-  validation_data=valGen,  # Validation data generator.
-  callbacks=[
-    # Save the best model (by validation categorical accuracy).
-    ModelCheckpoint(
-      f"{outputDir}/Model.keras",  # Filepath to save the best model.
-      save_best_only=True,  # Only save the model if validation accuracy improves.
-      save_weights_only=False,  # Save the entire model (architecture + weights).
-      monitor="val_loss",  # Metric to monitor for improvement.
-      verbose=1,  # Print messages when a new best model is saved.
-    ),
-    # Stop training early if validation stops improving.
-    EarlyStopping(patience=50),
-    # Record training history to CSV for later analysis.
-    CSVLogger(f"{outputDir}/Log.log"),
-    # Reduce learning rate when a monitored metric plateaus.
-    ReduceLROnPlateau(factor=0.5, patience=10),
-    # TensorBoard callback to log training for visualization.
-    TensorBoard(log_dir=f"{outputDir}/TB/Logs", histogram_freq=1),
-  ],
-  verbose=2,  # Print progress during training (1 for progress bar, 2 for one line per epoch, 0 for silent).
+study.optimize(
+  objFunc,
+  # Number of hyperparameter combinations to try. Adjust this based on your computational resources and time constraints.
+  n_trials=10,
+  show_progress_bar=True,  # Show a progress bar during the optimization process for better visibility of progress.
+  # Garbage collect after each trial to free up memory, especially important when training deep learning models.
+  gc_after_trial=True,
+  # Set a timeout of 2 hours (7200 seconds) to prevent excessively long runs. Adjust this based on your expected training time and computational resources.
+  timeout=7200,
+  # Number of parallel jobs to run. Set to 1 for sequential execution. Increase this if you have multiple GPUs or want to speed up the search, but be cautious of memory constraints.
+  n_jobs=1,
 )
 
-# Load the best model saved during training.
-model.load_weights(f"{outputDir}/Model.keras")
+print(f"Number of Finished Trials: {len(study.trials)}")
 
-# Evaluate the trained model on training, validation, and test splits.
-for name, dataGen in [("Training", trainGen), ("Validation", valGen), ("Testing", testGen)]:
-  # Print which split is being evaluated.
-  print(f"{name} Evaluation:")
-  # Evaluate generator and capture results.
-  result = model.evaluate(dataGen, batch_size=batchSize, verbose=0)
-  # Print the common metrics in the order returned by model.evaluate.
-  print("Loss:", result[0])
-  print("Accuracy:", result[1])
-  print("Precision:", result[2])
-  print("Recall:", result[3])
-  print("AUC:", result[4])
-  print("TP:", result[5])
-  print("TN:", result[6])
-  print("FP:", result[7])
-  print("FN:", result[8])
+# Get the best hyperparameters.
+print("Best Trial:")
+trial = study.best_trial
 
-# Plot training and validation loss and accuracy curves across epochs.
-plt.figure()
-plt.subplot(2, 1, 1)
-# Plot training and validation loss.
-plt.plot(history.history["loss"], label="Training Loss")
-plt.plot(history.history["val_loss"], label="Validation Loss")
-plt.legend()
-plt.grid()
-plt.tight_layout()
-plt.subplot(2, 1, 2)
-# Plot training and validation categorical accuracy.
-plt.plot(history.history["categorical_accuracy"], label="Training Accuracy")
-plt.plot(history.history["val_categorical_accuracy"], label="Validation Accuracy")
-plt.legend()
-plt.grid()
-plt.tight_layout()
-# Save the figure to the History folder for later review.
-plt.savefig(f"{outputDir}/History.png")
-# Display the plot interactively.
-# plt.show()  # Uncomment this line if you want to see the plot during execution.
-plt.close()
+print("Value: {}".format(trial.value))
 
-# Generate predictions on the test set using the trained model.
-yCatPred = model.predict(testGen, batch_size=batchSize, verbose=0)
-# Convert the one-hot predictions to class indices.
-yPred = np.argmax(yCatPred, axis=1)
-# Get true class indices from the test generator.
-yTrue = testGen.classes
-# Compute the confusion matrix between true and predicted labels.
-cm = confusion_matrix(yTrue, yPred)
-# Create a display object and plot the confusion matrix.
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=testGen.class_indices)
-# Show the confusion matrix plot.
-disp.plot()
-# Rotate x-axis labels for better readability.
-plt.xticks(rotation=45)
-plt.tight_layout()  # Adjust layout to prevent overlap of labels and titles.
-# Save the confusion matrix figure to the History folder.
-plt.savefig(f"{outputDir}/ConfusionMatrix.png")
-# plt.show()  # Uncomment this line if you want to see the plot during execution.
-plt.close()
-
-# Calculate all metrics.
-print("Confusion Matrix:")
-cm = confusion_matrix(yTrue, yPred)
-print("Performance Metrics:")
-results = CalculateAllMetrics(cm)
-for key, value in results.items():
-  print(f"{key}:", value)
+print("Hyperparameters: ")
+for key, value in trial.params.items():
+  print("\t{}: {}".format(key, value))

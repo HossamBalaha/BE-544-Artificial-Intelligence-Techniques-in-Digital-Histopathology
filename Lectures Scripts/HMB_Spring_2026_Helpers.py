@@ -30,6 +30,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import xml.etree.ElementTree as ET
 from shapely.geometry import Polygon
+import keras_tuner as kt
+import tensorflow as tf
+from tensorflow.keras.layers import *
+from tensorflow.keras.models import *
+from tensorflow.keras.losses import *
+from tensorflow.keras.metrics import *
+from tensorflow.keras.callbacks import *
+from tensorflow.keras.optimizers import *
+from tensorflow.keras.applications import *
+from tensorflow.keras.backend import clear_session
 
 
 def ExtractBACHAnnotationsFromXML(xmlFile, verbose=True):
@@ -763,7 +773,7 @@ def CalculateAllMetrics(cm):
   precision = np.mean(TP / (TP + FP))
   recall = np.mean(TP / (TP + FN))
   f1 = 2 * precision * recall / (precision + recall)
-  accuracy = np.mean(TP + TN) / np.sum(confMatrix)
+  accuracy = np.mean(TP + TN) / np.sum(cm)
   specificity = np.mean(TN / (TN + FP))
 
   results["Macro Precision"] = precision
@@ -792,7 +802,7 @@ def CalculateAllMetrics(cm):
   precision = np.sum(TP / (TP + FP) * weights)
   recall = np.sum(TP / (TP + FN) * weights)
   f1 = 2.0 * precision * recall / (precision + recall)
-  accuracy = np.sum((TP + TN) * weights) / np.sum(confMatrix)
+  accuracy = np.sum((TP + TN) * weights) / np.sum(cm)
   specificity = np.sum(TN / (TN + FP) * weights)
 
   results["Weighted Precision"] = precision
@@ -802,3 +812,266 @@ def CalculateAllMetrics(cm):
   results["Weighted Specificity"] = specificity
 
   return results
+
+
+def PretrainedModelHyperparamsBuilderKT():
+  hp = kt.HyperParameters()
+
+  # Which pretrained backbone to use for transfer learning / fine-tuning.
+  hp.Choice("baseModel", ["MobileNetV2", "InceptionV3", "ResNet50", "VGG16", "VGG19", "Xception"])
+  # Optimizer family to use when compiling the model.
+  hp.Choice("optimizer", ["Adam", "RMSprop", "SGD", "Adagrad", "Adadelta", "Adamax", "Nadam"])
+  # Learning rate choices to search over.
+  hp.Choice("learningRate", [1e-2, 1e-3, 1e-4, 1e-5])
+  # Batch size options used during training.
+  hp.Choice("batchSize", [8, 16, 32, 64])
+  # Whether to insert dropout layers in the classifier head.
+  hp.Choice("applyDropout", [True, False])
+  # Dropout rate options when dropout is applied.
+  hp.Choice("dropout", [0.1, 0.2, 0.3, 0.4, 0.5])
+
+  return hp
+
+
+def PretrainedModelBuilderKT(inputShape=(256, 256, 3), noOfClasses=4):
+  def _helper(hp):
+    baseModelCls = {
+      "MobileNetV2": MobileNetV2,
+      "InceptionV3": InceptionV3,
+      "ResNet50"   : ResNet50,
+      "VGG16"      : VGG16,
+      "VGG19"      : VGG19,
+      "Xception"   : Xception,
+    }
+
+    optimizerCls = {
+      "Adam"    : Adam,
+      "RMSprop" : RMSprop,
+      "SGD"     : SGD,
+      "Adagrad" : Adagrad,
+      "Adadelta": Adadelta,
+      "Adamax"  : Adamax,
+      "Nadam"   : Nadam,
+    }
+
+    # Instantiate the selected base model with pretrained ImageNet weights and
+    # without the top classification layer.
+    selectedModel = hp["baseModel"]
+    baseModel = baseModelCls[selectedModel](
+      # Exclude default classification head; we'll add a custom head.
+      include_top=False,
+      # Initialize with ImageNet weights.
+      weights="imagenet",
+      # Input image shape for the model.
+      input_shape=inputShape,
+    )
+
+    # Freeze the base model layers to prevent them from being updated during training.
+    for layer in baseModel.layers:
+      layer.trainable = False
+
+    layers = [
+      baseModel,
+      # Pool spatial features and produce a vector representation.
+      GlobalAveragePooling2D(),
+      # Dense layers for the custom classification head.
+      Dense(128, activation="relu"),
+      Dense(64, activation="relu"),
+      # Final classification layer.
+      Dense(noOfClasses, activation="softmax") if (noOfClasses > 2) else Dense(1, activation="sigmoid")
+    ]
+
+    if (hp["applyDropout"]):
+      # Insert dropout layers into the head to help regularize training.
+      layers.insert(4, Dropout(hp["dropout"]))
+      layers.insert(3, Dropout(hp["dropout"]))
+
+    model = Sequential(layers)
+
+    selectedOptimizer = hp["optimizer"]
+    selectedLR = hp["learningRate"]
+    model.compile(
+      # Instantiate the optimizer selected by the tuner with the chosen LR.
+      optimizer=optimizerCls[selectedOptimizer](learning_rate=selectedLR),
+      # Use categorical cross-entropy for multi-class classification.
+      loss="categorical_crossentropy" if (noOfClasses > 2) else "binary_crossentropy",
+      # Useful metrics to monitor during training and evaluation.
+      metrics=[
+        CategoricalAccuracy(),
+        Precision(),
+        Recall(),
+        AUC(),
+        TruePositives(name="TP"),
+        TrueNegatives(name="TN"),
+        FalsePositives(name="FP"),
+        FalseNegatives(name="FN"),
+      ],
+    )
+
+    # Print the model summary to visualize the architecture and number of parameters.
+    model.summary()
+
+    # Return the compiled model to the tuner for training with the current set of hyperparameters.
+    return model
+
+  # The outer function returns the inner helper function which takes the hyperparameters
+  # as input and builds the model accordingly.
+  return _helper
+
+
+def PretrainedModelKerasTuner(
+    inputShape=(256, 256, 3),
+    maxEpochs=100,
+    noOfClasses=4,
+    directory="History",
+    projectName="PretrainedKerasTuner",
+):
+  hp = PretrainedModelHyperparamsBuilderKT()
+
+  # Instantiate the Hyperband tuner which will perform an efficient hyperparameter search over the defined space.
+  tuner = kt.Hyperband(
+    PretrainedModelBuilderKT(inputShape=inputShape, noOfClasses=noOfClasses),
+    hyperparameters=hp,
+    objective="val_categorical_accuracy",
+    max_epochs=maxEpochs,  # This is the maximum number of epochs to train the model.
+    factor=7,  # This is the downsampling factor for the number of epochs.
+    directory=directory,
+    project_name=projectName,
+  )
+
+  return tuner
+
+
+def PretrainedModelOptuna(
+    baseModelStr,
+    optimizerStr,
+    dropout,
+    applyDropout,
+    learningRate,
+    inputShape=(256, 256, 3),
+    noOfClasses=4,
+):
+  baseModelCls = {
+    "MobileNetV2": MobileNetV2,
+    "InceptionV3": InceptionV3,
+    "ResNet50"   : ResNet50,
+    "VGG16"      : VGG16,
+    "VGG19"      : VGG19,
+    "Xception"   : Xception,
+  }
+
+  optimizerCls = {
+    "Adam"    : Adam,
+    "RMSprop" : RMSprop,
+    "SGD"     : SGD,
+    "Adagrad" : Adagrad,
+    "Adadelta": Adadelta,
+    "Adamax"  : Adamax,
+    "Nadam"   : Nadam,
+  }
+
+  # Instantiate the selected base model with pretrained ImageNet weights and
+  # without the top classification layer.
+  baseModel = baseModelCls[baseModelStr](
+    # Exclude default classification head; we'll add a custom head.
+    include_top=False,
+    # Initialize with ImageNet weights.
+    weights="imagenet",
+    # Input image shape for the model.
+    input_shape=inputShape,
+  )
+
+  # Freeze the base model layers to prevent them from being updated during training.
+  for layer in baseModel.layers:
+    layer.trainable = False
+
+  layers = [
+    baseModel,
+    # Pool spatial features and produce a vector representation.
+    GlobalAveragePooling2D(),
+    # Dense layers for the custom classification head.
+    Dense(128, activation="relu"),
+    Dense(64, activation="relu"),
+    # Final classification layer.
+    Dense(noOfClasses, activation="softmax") if (noOfClasses > 2) else Dense(1, activation="sigmoid")
+  ]
+
+  if (applyDropout):
+    # Insert dropout layers into the head to help regularize training.
+    layers.insert(4, Dropout(dropout))
+    layers.insert(3, Dropout(dropout))
+
+  model = Sequential(layers)
+
+  model.compile(
+    # Instantiate the optimizer selected by the tuner with the chosen LR.
+    optimizer=optimizerCls[optimizerStr](learning_rate=learningRate),
+    # Use categorical cross-entropy for multi-class classification.
+    loss="categorical_crossentropy" if (noOfClasses > 2) else "binary_crossentropy",
+    # Useful metrics to monitor during training and evaluation.
+    metrics=[
+      CategoricalAccuracy(),
+      Precision(),
+      Recall(),
+      AUC(),
+      TruePositives(name="TP"),
+      TrueNegatives(name="TN"),
+      FalsePositives(name="FP"),
+      FalseNegatives(name="FN"),
+    ],
+  )
+
+  return model
+
+
+def PretrainedModelOptunaObjectiveFunction(inputShape, trainGen, valGen, testGen, noOfClasses, maxEpochs):
+  def _helper(trial):
+    try:
+      clear_session()
+
+      baseModelStr = trial.suggest_categorical(
+        "baseModel",
+        ["MobileNetV2", "InceptionV3", "ResNet50", "VGG16", "VGG19", "Xception"]
+      )
+
+      optimizerClsStr = trial.suggest_categorical(
+        "optimizer",
+        ["Adam", "RMSprop", "SGD", "Adagrad", "Adadelta", "Adamax", "Nadam"]
+      )
+
+      dropoutRatio = trial.suggest_categorical("dropout", [0.1, 0.2, 0.3, 0.4, 0.5])
+      batchSize = trial.suggest_categorical("batchSize", [8, 16, 32, 64])
+      applyDropout = trial.suggest_categorical("applyDropout", [True, False])
+      learningRate = trial.suggest_float("learningRate", 1e-5, 1e-1, log=True)
+
+      model = PretrainedModelOptuna(
+        baseModelStr,
+        optimizerClsStr,
+        dropoutRatio,
+        applyDropout,
+        learningRate,
+        inputShape,
+        noOfClasses,
+      )
+
+      model.fit(
+        trainGen,
+        epochs=maxEpochs,
+        validation_data=valGen,
+        batch_size=batchSize,
+        callbacks=[
+          EarlyStopping(patience=3),
+          ReduceLROnPlateau(factor=0.5, patience=3),
+        ],
+        verbose=1,
+      )
+
+      # Evaluate the model on the test set and return the categorical accuracy.
+      result = model.evaluate(testGen, batch_size=batchSize, verbose=0)
+
+      return result[1]  # Return the categorical accuracy.
+
+    except Exception as e:
+      return 0.0
+
+  return _helper

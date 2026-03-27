@@ -9,6 +9,7 @@ keras
 split-folders==0.5.1
 keras_tuner==1.4.7
 optuna==4.*
+optuna-dashboard
 patchify==0.2.3
 torch==2.7.1+cu128
 torchvision==0.22.1+cu128

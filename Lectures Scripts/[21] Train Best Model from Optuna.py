@@ -8,22 +8,15 @@
 # Permissions and Citation: Refer to the README file.
 '''
 
-import os, warnings
+import os, warnings, optuna
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
 import tensorflow as tf
-from tensorflow.keras.layers import *
-from tensorflow.keras.models import *
-from tensorflow.keras.optimizers import *
-from tensorflow.keras.losses import *
-from tensorflow.keras.metrics import *
+import matplotlib.pyplot as plt
 from tensorflow.keras.callbacks import *
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.model_selection import train_test_split
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.applications import *
-from HMB_Spring_2026_Helpers import CalculateAllMetrics
+from HMB_Spring_2026_Helpers import PretrainedModelOptuna
 
 # Ignore warnings.
 warnings.filterwarnings("ignore")
@@ -31,61 +24,6 @@ warnings.filterwarnings("ignore")
 print("TensorFlow Version:", tf.__version__)
 # Print number of visible GPUs.
 print("Num GPUs Available:", len(tf.config.list_physical_devices("GPU")))
-
-
-def PretrainedCNN(baseModel, inputShape, noOfClasses=4, optimizer=Adam(), verbose=0):
-  if (not baseModel):
-    # Create the model.
-    baseModel = MobileNetV2(
-      # Exclude default classification head; we'll add a custom head.
-      include_top=False,
-      # Initialize with ImageNet weights.
-      weights="imagenet",
-      # Input image shape for the model.
-      input_shape=inputShape,
-    )
-
-  for layer in baseModel.layers:
-    # Freeze the pretrained base during initial fine-tuning.
-    layer.trainable = False
-
-  model = Sequential([
-    # Pretrained convolutional backbone.
-    baseModel,
-    # Aggregate spatial features into a vector.
-    GlobalAveragePooling2D(),
-    # Fully-connected layers for task-specific learning.
-    Dense(128, activation="relu"),
-    Dropout(0.5),
-    Dense(64, activation="relu"),
-    Dropout(0.5),
-    # Output layer: softmax over 4 classes.
-    Dense(noOfClasses, activation="softmax") if (noOfClasses > 2) else Dense(1, activation="sigmoid"),
-  ])
-
-  model.compile(
-    optimizer=optimizer,
-    # You can use "sparse_categorical_crossentropy" if your labels are integers instead of one-hot encoded.
-    loss="categorical_crossentropy" if (noOfClasses > 2) else "binary_crossentropy",
-    metrics=[
-      CategoricalAccuracy() if (noOfClasses > 2) else BinaryAccuracy(),
-      Precision(),
-      Recall(),
-      AUC(),
-      TruePositives(name="TP"),
-      TrueNegatives(name="TN"),
-      FalsePositives(name="FP"),
-      FalseNegatives(name="FN"),
-    ],
-  )
-
-  # Optionally print the model summary when verbose is enabled.
-  if (verbose):
-    model.summary()
-
-  # Return the compiled Keras model.
-  return model
-
 
 # ======================================================================== #
 # RELATED TO BreakHist DATASET.
@@ -164,14 +102,43 @@ print(f"Testing set size: {len(testDF)}")
 
 # Define the network input image shape (H, W, C).
 inputShape = (256, 256, 3)
-# Training batch size.
-batchSize = 64
 # Number of epochs to train.
 epochs = 200
 # Define the output directory for saving models and logs.
-outputDir = "History/Pretrained Models Fine-Tuning Training"
+outputDir = f"History/Pretrained Optuna Best Model Training {whichCategory} {whichMagnification}"
 # Create the output directory if it does not exist.
 os.makedirs(outputDir, exist_ok=True)
+
+optunaStorageDir = f"History/Pretrained Models with Optuna {whichCategory} {whichMagnification}"
+# Create the output directory if it does not exist.
+os.makedirs(optunaStorageDir, exist_ok=True)
+if (not os.path.exists(f"{optunaStorageDir}/PretrainedOptuna.db")):
+  raise FileNotFoundError(
+    f"Optuna database not found at {optunaStorageDir}/PretrainedOptuna.db."
+    f"Please run the hyperparameter optimization script to create the database before accessing it."
+  )
+
+# Search for the best hyperparameters.
+study = optuna.create_study(
+  direction="maximize",  # We want to maximize the categorical accuracy.
+  study_name="PretrainedOptuna",  # This is the name of the study.
+  load_if_exists=True,  # This will load the study if it exists.
+  storage=f"sqlite:///{optunaStorageDir}/PretrainedOptuna.db",  # This is the database file.
+)
+print(f"Number of Finished Trials: {len(study.trials)}")
+
+# Get the best hyperparameters.
+print("Best Trial:")
+trial = study.best_trial
+
+print("Value: {}".format(trial.value))
+
+print("Hyperparameters: ")
+for key, value in trial.params.items():
+  print("\t{}: {}".format(key, value))
+
+# Extract the best hyperparameters for building the model.
+batchSize = trial.params["batchSize"]  # Batch size for training.
 
 # Create a data generator for training with simple rescaling.
 trainDataGen = ImageDataGenerator(
@@ -208,7 +175,7 @@ valGen = valDataGen.flow_from_dataframe(
   x_col="image_path",  # Column in DataFrame that contains image file paths.
   y_col="label",  # Column in DataFrame that contains class labels.
   target_size=inputShape[:2],  # Resize to model input size.
-  batch_size=batchSize,  # Batch size for validation.
+  batch_size=batchSize,  # Batch size for training.
   class_mode="categorical",  # Use one-hot encoded labels for validation.
   shuffle=True,  # Shuffle validation data (optional, can be False if order matters for metrics).
 )
@@ -224,7 +191,7 @@ testGen = testDataGen.flow_from_dataframe(
   x_col="image_path",  # Column in DataFrame that contains image file paths.
   y_col="label",  # Column in DataFrame that contains class labels.
   target_size=inputShape[:2],  # Resize to model input size.
-  batch_size=batchSize,  # Batch size for testing (can be larger since no backprop).
+  batch_size=batchSize,  # Batch size for training.
   class_mode="categorical",  # Use one-hot encoded labels for evaluation.
   shuffle=False,  # Do not shuffle test data to maintain order for metrics like confusion matrix.
 )
@@ -252,21 +219,14 @@ for text, gen in [("Training", trainGen), ("Validation", valGen), ("Testing", te
   # plt.show()  # Uncomment this line if you want to see the plot during execution.
   plt.close()  # Close the figure to free memory.
 
-baseModel = MobileNetV2(
-  # Exclude default classification head; we'll add a custom head.
-  include_top=False,
-  # Initialize with ImageNet weights.
-  weights="imagenet",
-  # Input image shape for the model.
-  input_shape=inputShape,
-)
-
-model = PretrainedCNN(
-  baseModel,
-  inputShape,  # Input shape for the model (height, width, channels).
-  optimizer=Adam(),  # Use Adam optimizer for training.
-  noOfClasses=noOfClasses,  # Set the number of output classes.
-  verbose=1,  # Print model summary when creating the model.
+model = PretrainedModelOptuna(
+  trial.params["baseModel"],
+  trial.params["optimizer"],
+  trial.params["dropout"],
+  trial.params["applyDropout"],
+  trial.params["learningRate"],
+  inputShape=inputShape,
+  noOfClasses=noOfClasses,
 )
 
 # Train the model with several useful callbacks.

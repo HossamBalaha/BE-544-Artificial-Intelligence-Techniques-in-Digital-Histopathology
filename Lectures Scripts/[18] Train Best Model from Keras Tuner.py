@@ -23,7 +23,7 @@ from tensorflow.keras.callbacks import *
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.applications import *
-from HMB_Spring_2026_Helpers import CalculateAllMetrics
+from HMB_Spring_2026_Helpers import CalculateAllMetrics, PretrainedModelKerasTuner, PretrainedModelBuilderKT
 
 # Ignore warnings.
 warnings.filterwarnings("ignore")
@@ -31,61 +31,6 @@ warnings.filterwarnings("ignore")
 print("TensorFlow Version:", tf.__version__)
 # Print number of visible GPUs.
 print("Num GPUs Available:", len(tf.config.list_physical_devices("GPU")))
-
-
-def PretrainedCNN(baseModel, inputShape, noOfClasses=4, optimizer=Adam(), verbose=0):
-  if (not baseModel):
-    # Create the model.
-    baseModel = MobileNetV2(
-      # Exclude default classification head; we'll add a custom head.
-      include_top=False,
-      # Initialize with ImageNet weights.
-      weights="imagenet",
-      # Input image shape for the model.
-      input_shape=inputShape,
-    )
-
-  for layer in baseModel.layers:
-    # Freeze the pretrained base during initial fine-tuning.
-    layer.trainable = False
-
-  model = Sequential([
-    # Pretrained convolutional backbone.
-    baseModel,
-    # Aggregate spatial features into a vector.
-    GlobalAveragePooling2D(),
-    # Fully-connected layers for task-specific learning.
-    Dense(128, activation="relu"),
-    Dropout(0.5),
-    Dense(64, activation="relu"),
-    Dropout(0.5),
-    # Output layer: softmax over 4 classes.
-    Dense(noOfClasses, activation="softmax") if (noOfClasses > 2) else Dense(1, activation="sigmoid"),
-  ])
-
-  model.compile(
-    optimizer=optimizer,
-    # You can use "sparse_categorical_crossentropy" if your labels are integers instead of one-hot encoded.
-    loss="categorical_crossentropy" if (noOfClasses > 2) else "binary_crossentropy",
-    metrics=[
-      CategoricalAccuracy() if (noOfClasses > 2) else BinaryAccuracy(),
-      Precision(),
-      Recall(),
-      AUC(),
-      TruePositives(name="TP"),
-      TrueNegatives(name="TN"),
-      FalsePositives(name="FP"),
-      FalseNegatives(name="FN"),
-    ],
-  )
-
-  # Optionally print the model summary when verbose is enabled.
-  if (verbose):
-    model.summary()
-
-  # Return the compiled Keras model.
-  return model
-
 
 # ======================================================================== #
 # RELATED TO BreakHist DATASET.
@@ -164,14 +109,31 @@ print(f"Testing set size: {len(testDF)}")
 
 # Define the network input image shape (H, W, C).
 inputShape = (256, 256, 3)
-# Training batch size.
-batchSize = 64
 # Number of epochs to train.
 epochs = 200
 # Define the output directory for saving models and logs.
-outputDir = "History/Pretrained Models Fine-Tuning Training"
+outputDir = f"History/Pretrained KT Best Model Training {whichCategory} {whichMagnification}"
 # Create the output directory if it does not exist.
 os.makedirs(outputDir, exist_ok=True)
+
+ktStorageDir = f"History/Pretrained Models with Keras Tuner {whichCategory} {whichMagnification}"
+if (not os.path.exists(ktStorageDir)):
+  raise Exception(f"The Keras Tuner storage directory '{ktStorageDir}' does not exist.")
+
+tuner = PretrainedModelKerasTuner(
+  inputShape=inputShape,  # Input shape of the images (height, width, channels).
+  maxEpochs=epochs,  # Maximum number of epochs to train during the hyperparameter search.
+  noOfClasses=noOfClasses,  # Number of output classes for the classification task.
+  directory=ktStorageDir,  # Directory where Keras Tuner saved the results of the hyperparameter search.
+  projectName="PretrainedKerasTuner",
+)
+# Get the best hyperparameters.
+bestHP = tuner.get_best_hyperparameters(1)[0]
+print("Best Hyperparameters:")
+print(bestHP.values)
+
+# Extract the best hyperparameters for building the model.
+batchSize = bestHP.get("batchSize")
 
 # Create a data generator for training with simple rescaling.
 trainDataGen = ImageDataGenerator(
@@ -252,22 +214,10 @@ for text, gen in [("Training", trainGen), ("Validation", valGen), ("Testing", te
   # plt.show()  # Uncomment this line if you want to see the plot during execution.
   plt.close()  # Close the figure to free memory.
 
-baseModel = MobileNetV2(
-  # Exclude default classification head; we'll add a custom head.
-  include_top=False,
-  # Initialize with ImageNet weights.
-  weights="imagenet",
-  # Input image shape for the model.
-  input_shape=inputShape,
-)
-
-model = PretrainedCNN(
-  baseModel,
-  inputShape,  # Input shape for the model (height, width, channels).
-  optimizer=Adam(),  # Use Adam optimizer for training.
-  noOfClasses=noOfClasses,  # Set the number of output classes.
-  verbose=1,  # Print model summary when creating the model.
-)
+model = PretrainedModelBuilderKT(
+  inputShape=inputShape,
+  noOfClasses=noOfClasses,
+)(bestHP)  # Build the model using the best hyperparameters from Keras Tuner.
 
 # Train the model with several useful callbacks.
 history = model.fit(
