@@ -25,7 +25,7 @@
 # # -------------------------------------------------- #
 
 # Import necessary libraries.
-import os, cv2, openslide, tqdm
+import os, cv2, openslide, tqdm, patchify
 import numpy as np
 import matplotlib.pyplot as plt
 import xml.etree.ElementTree as ET
@@ -40,6 +40,8 @@ from tensorflow.keras.callbacks import *
 from tensorflow.keras.optimizers import *
 from tensorflow.keras.applications import *
 from tensorflow.keras.backend import clear_session
+from tensorflow.keras import backend as K
+from tensorflow.keras.utils import Sequence
 
 
 def ExtractBACHAnnotationsFromXML(xmlFile, verbose=True):
@@ -200,11 +202,11 @@ def ExtractWSIRegion(slide, region):
 
 
 def ExtractPyramidalWSITiles(
-    slide,
-    x=0,
-    y=0,
-    width=512,
-    height=512,
+  slide,
+  x=0,
+  y=0,
+  width=512,
+  height=512,
 ):
   # Get the number of pyramid levels in the slide.
   slideLevels = slide.level_count
@@ -360,19 +362,19 @@ def PrepareAnnotationsForLevel(annotation, dFactor=1.0):
 
 
 def ExtractRegionTiles(
-    slide,
-    region,
-    width=512,
-    height=512,
-    overlapWidth=0,
-    overlapHeight=0,
-    storageDir=None,
-    maxTiles=None,
-    addPlots=True,
-    prefix="",
-    blackRatioThreshold=0.90,
-    removeBackgroundTiles=True,
-    convertBlackToWhite=True,
+  slide,
+  region,
+  width=512,
+  height=512,
+  overlapWidth=0,
+  overlapHeight=0,
+  storageDir=None,
+  maxTiles=None,
+  addPlots=True,
+  prefix="",
+  blackRatioThreshold=0.90,
+  removeBackgroundTiles=True,
+  convertBlackToWhite=True,
 ):
   r'''
   Extract tiles from a specified region of a whole-slide image (WSI) across all pyramid levels,
@@ -632,14 +634,14 @@ def ExtractRegionTiles(
 
 
 def IsBackgroundTile(
-    imagePath,  # Path to the tile image to analyze for background detection.
-    image=None,  # Optional pre-loaded image as a NumPy array (H,W,3) uint8. If provided, imagePath will be ignored.
-    # Threshold for Shannon entropy to detect uniformity. Adjust based on the expected variability in tissue tiles.
-    entropyThreshold=5.5,
-    # Threshold for color variance to detect lack of color diversity. Adjust based on the expected variability in tissue tiles.
-    colorVarianceThreshold=1500,
-    tissueAreaThreshold=0.20,  # Minimum ratio of tissue area to total area to consider the tile as non-background.
-    convertBlackToWhite=True,  # Convert black pixels to white before analysis to avoid skewing the metrics.
+  imagePath,  # Path to the tile image to analyze for background detection.
+  image=None,  # Optional pre-loaded image as a NumPy array (H,W,3) uint8. If provided, imagePath will be ignored.
+  # Threshold for Shannon entropy to detect uniformity. Adjust based on the expected variability in tissue tiles.
+  entropyThreshold=5.5,
+  # Threshold for color variance to detect lack of color diversity. Adjust based on the expected variability in tissue tiles.
+  colorVarianceThreshold=1500,
+  tissueAreaThreshold=0.20,  # Minimum ratio of tissue area to total area to consider the tile as non-background.
+  convertBlackToWhite=True,  # Convert black pixels to white before analysis to avoid skewing the metrics.
 ):
   '''
   Detect background tiles using multiple criteria suitable for non-black backgrounds.
@@ -920,11 +922,11 @@ def PretrainedModelBuilderKT(inputShape=(256, 256, 3), noOfClasses=4):
 
 
 def PretrainedModelKerasTuner(
-    inputShape=(256, 256, 3),
-    maxEpochs=100,
-    noOfClasses=4,
-    directory="History",
-    projectName="PretrainedKerasTuner",
+  inputShape=(256, 256, 3),
+  maxEpochs=100,
+  noOfClasses=4,
+  directory="History",
+  projectName="PretrainedKerasTuner",
 ):
   hp = PretrainedModelHyperparamsBuilderKT()
 
@@ -943,13 +945,13 @@ def PretrainedModelKerasTuner(
 
 
 def PretrainedModelOptuna(
-    baseModelStr,
-    optimizerStr,
-    dropout,
-    applyDropout,
-    learningRate,
-    inputShape=(256, 256, 3),
-    noOfClasses=4,
+  baseModelStr,
+  optimizerStr,
+  dropout,
+  applyDropout,
+  learningRate,
+  inputShape=(256, 256, 3),
+  noOfClasses=4,
 ):
   baseModelCls = {
     "MobileNetV2": MobileNetV2,
@@ -1075,3 +1077,337 @@ def PretrainedModelOptunaObjectiveFunction(inputShape, trainGen, valGen, testGen
       return 0.0
 
   return _helper
+
+
+class ClassToken(Layer):
+  def __init__(self):
+    super().__init__()
+
+  def build(self, input_shape):
+    wInit = tf.random_normal_initializer()
+    self.w = tf.Variable(
+      initial_value=wInit(shape=(1, 1, input_shape[-1]), dtype=tf.float32),
+      trainable=True
+    )
+
+  def call(self, inputs):
+    batchSize = tf.shape(inputs)[0]
+    hiddenDim = self.w.shape[-1]
+
+    cls = tf.broadcast_to(self.w, [batchSize, 1, hiddenDim])
+    cls = tf.cast(cls, dtype=inputs.dtype)
+    return cls
+
+
+def MLP(z, configs):
+  z = Dense(configs["MLPDimension"], activation=configs["HiddenActivation"])(z)
+  z = Dropout(configs["DropoutRatio"])(z)
+  z = Dense(configs["EmbedDimension"])(z)
+  z = Dropout(configs["DropoutRatio"])(z)
+  return z
+
+
+def TransformerEncoder(z, configs):
+  skipCon = z
+  z = LayerNormalization()(z)
+  # https://keras.io/api/layers/attention_layers/multi_head_attention/
+  z = MultiHeadAttention(
+    # Number of attention heads.
+    num_heads=configs["NumAttentionHeads"],
+    # Size of each attention head for query and key.
+    key_dim=configs["EmbedDimension"] // configs["NumAttentionHeads"],
+    # Size of each attention head for value.
+    value_dim=configs["EmbedDimension"] // configs["NumAttentionHeads"],
+    # Dropout rate after attention.
+    dropout=configs["DropoutRatio"],
+  )(z, z)
+  z = Add()([z, skipCon])
+
+  skipCon = z
+  z = LayerNormalization()(z)
+  z = MLP(z, configs)  # Feed Forward Network.
+  z = Add()([z, skipCon])
+
+  return z
+
+
+def PatchEmbedding(z, configs):
+  z = Reshape(target_shape=(configs["NumPatches"], configs["EmbedDimension"]))(z)
+  z = Dense(configs["EmbedDimension"])(z)
+  return z
+
+
+class PositionEmbedding(Layer):
+  def __init__(self, numPatches, embedDim, **kwargs):
+    super().__init__(**kwargs)
+    self.posEmbedding = Embedding(input_dim=numPatches, output_dim=embedDim)
+    self.positions = tf.range(start=0, limit=numPatches, delta=1)
+
+  def call(self, inputs):
+    # Broadcasting handles batch dimension automatically.
+    return self.posEmbedding(self.positions)
+
+
+def ClassificationHead(z, configs):
+  z = Dense(configs["EmbedDimension"], activation=configs["HiddenActivation"])(z)
+  z = Dropout(configs["DropoutRatio"])(z)
+  z = Dense(configs["NumClasses"], activation=configs["OutputActivation"])(z)
+  return z
+
+
+def BasicVisionTransformer(configs):
+  inputShape = (configs["NumPatches"], configs["EmbedDimension"])
+  inputs = Input(inputShape)
+
+  patchEmbed = PatchEmbedding(inputs, configs)  # Create the patch embeddings.
+  # Create the position embeddings.
+  posEmbed = PositionEmbedding(configs["NumPatches"], configs["EmbedDimension"])(patchEmbed)
+  Z = patchEmbed + posEmbed  # Add the patch and position embeddings.
+
+  token = ClassToken()(Z)  # Create the class token.
+  Z = Concatenate(axis=1)([token, Z])  # Prepend the class token to the patch embeddings.
+
+  # Create the transformer encoder layers.
+  for _ in range(configs["NumEncoderLayers"]):
+    Z = TransformerEncoder(Z, configs)
+
+  # Final normalization layer.
+  Z = LayerNormalization()(Z)
+
+  # Extract the class token.
+  cls = Z[:, 0, :]
+
+  # Create the classification head.
+  output = ClassificationHead(cls, configs)
+
+  model = Model(inputs, output)
+
+  model.compile(
+    optimizer=configs["Optimizer"],
+    loss=configs["LossFunction"],
+    metrics=[
+      CategoricalAccuracy(),
+      Precision(),
+      Recall(),
+      AUC(),
+      TruePositives(name="TP"),
+      TrueNegatives(name="TN"),
+      FalsePositives(name="FP"),
+      FalseNegatives(name="FN"),
+    ],
+  )
+  return model
+
+
+def ImageToPatches(image, noOfPatches, patchSize):
+  patches = patchify.patchify(image, (patchSize, patchSize, 3), step=patchSize)
+  patches = patches.reshape(-1, patchSize, patchSize, 3)
+  patches = patches[:noOfPatches]
+  patches = patches.reshape(-1, patchSize * patchSize * 3)
+  return patches
+
+
+class PatchDataGeneratorFromFolder(Sequence):
+
+  def __init__(
+    self, folder, inputShape, batchSize, classMode="categorical",
+    noOfPatches=256, patchSize=16, embedDimension=768, shuffle=False,
+  ):
+    self.folder = folder
+    self.inputShape = inputShape
+    self.batchSize = batchSize
+    self.classMode = classMode
+    self.noOfPatches = noOfPatches
+    self.patchSize = patchSize
+    self.embedDimension = embedDimension
+    self.classes = os.listdir(folder)
+    self.shuffle = shuffle
+
+    self.listOfImages = []
+    self.listOfLabels = []
+
+    for label in os.listdir(folder):
+      labelFolder = os.path.join(folder, label)
+      for image in os.listdir(labelFolder):
+        self.listOfImages.append(os.path.join(labelFolder, image))
+        self.listOfLabels.append(label)
+
+    self.numImages = len(self.listOfImages)
+    self.indices = np.arange(self.numImages)
+    self.classIndices = {label: index for index, label in enumerate(self.classes)}
+
+    np.random.shuffle(self.indices)
+
+  def __len__(self):
+    return self.numImages // self.batchSize
+
+  def __getitem__(self, index):
+    indices = self.indices[index * self.batchSize: (index + 1) * self.batchSize]
+    images = np.zeros((self.batchSize, self.noOfPatches, self.embedDimension))
+    if (self.classMode == "categorical"):
+      labels = np.zeros((self.batchSize, len(self.classIndices)))
+    else:
+      labels = np.zeros((self.batchSize, 1))
+
+    for i, index in enumerate(indices):
+      image = self.listOfImages[index]
+      label = self.listOfLabels[index]
+
+      image = cv2.imread(image)
+      image = cv2.resize(image, (self.inputShape[1], self.inputShape[0]), interpolation=cv2.INTER_CUBIC)
+      patches = ImageToPatches(image, self.noOfPatches, self.patchSize)
+
+      images[i] = patches
+
+      if (self.classMode == "categorical"):
+        labels[i, self.classIndices[label]] = 1
+      else:
+        labels[i] = self.classIndices[label]
+
+    return images / 255.0, labels
+
+  def on_epoch_end(self):
+    if (self.shuffle):
+      np.random.shuffle(self.indices)
+
+  def __iter__(self):
+    for index in range(0, len(self)):
+      yield self.__getitem__(index)
+
+  def __next__(self):
+    return self.__iter__()
+
+
+def CreatePatchDataGenerators(folder, inputShape, batchSize, **kwargs):
+  trainFolder = os.path.join(folder, "train")
+  valFolder = os.path.join(folder, "val")
+  testFolder = os.path.join(folder, "test")
+
+  trainGen = PatchDataGeneratorFromFolder(trainFolder, inputShape, batchSize, shuffle=True, **kwargs)
+  valGen = PatchDataGeneratorFromFolder(valFolder, inputShape, batchSize, **kwargs)
+  testGen = PatchDataGeneratorFromFolder(testFolder, inputShape, batchSize, **kwargs)
+
+  return trainGen, valGen, testGen
+
+
+class PatchDataGeneratorFromDataFrame(Sequence):
+  '''
+  Keras Sequence generator for Vision Transformer training using a pandas DataFrame.
+  This generator loads images from file paths specified in a DataFrame, extracts
+  non-overlapping patches, flattens them to embedding vectors, and yields batches 
+  compatible with the VisionTransformer model architecture.
+  '''
+
+  def __init__(
+    self, dataFrame, inputShape, batchSize, classMode="categorical",
+    noOfPatches=256, patchSize=16, embedDimension=768, shuffle=False,
+  ):
+    # Validate required DataFrame columns.
+    required_cols = {"image_path", "label"}
+    if (not required_cols.issubset(dataFrame.columns)):
+      raise ValueError(f"DataFrame must contain columns: {required_cols}")
+
+    self.dataFrame = dataFrame.reset_index(drop=True)
+    self.inputShape = inputShape
+    self.batchSize = batchSize
+    self.classMode = classMode
+    self.noOfPatches = noOfPatches
+    self.patchSize = patchSize
+    self.embedDimension = embedDimension
+    self.shuffle = shuffle
+
+    # Build class mapping for categorical encoding.
+    self.classes = sorted(dataFrame["label"].unique())
+    self.classIndices = {label: idx for idx, label in enumerate(self.classes)}
+    self.numClasses = len(self.classes)
+
+    self.numImages = len(self.dataFrame)
+    self.indices = np.arange(self.numImages)
+
+    # Warn about dropped samples if batch size doesn't divide evenly.
+    remainder = self.numImages % self.batchSize
+    if (remainder != 0):
+      print(
+        f"Warning: {remainder} samples will be dropped per epoch "
+        f"(batchSize={batchSize}, total={self.numImages})"
+      )
+
+    if (self.shuffle):
+      np.random.shuffle(self.indices)
+
+  def __len__(self):
+    '''Return number of batches per epoch.'''
+    return self.numImages // self.batchSize
+
+  def _image_to_patches(self, image):
+    '''Extract and flatten non-overlapping patches from a preprocessed image.'''
+
+    # Extract patches using patchify: returns (grid_h, grid_w, 1, ph, pw, c).
+    patches = patchify.patchify(image, (self.patchSize, self.patchSize, 3), step=self.patchSize)
+    # Reshape to flat list: (num_patches, patchSize, patchSize, 3)
+    patches = patches.reshape(-1, self.patchSize, self.patchSize, 3)
+    # Truncate or pad to expected number of patches
+    if (len(patches) < self.noOfPatches):
+      # Pad with zeros if insufficient patches (edge case for non-divisible dimensions).
+      padding = np.zeros((self.noOfPatches - len(patches), self.patchSize, self.patchSize, 3))
+      patches = np.concatenate([patches, padding], axis=0)
+    else:
+      patches = patches[:self.noOfPatches]
+    # Flatten each patch to vector: (noOfPatches, patchSize*patchSize*3).
+    return patches.reshape(self.noOfPatches, -1)
+
+  def __getitem__(self, index):
+    '''Generate one batch of data.'''
+    # Select batch indices.
+    batchIndices = self.indices[index * self.batchSize: (index + 1) * self.batchSize]
+
+    # Pre-allocate batch arrays (use empty for slight efficiency gain)
+    images = np.empty((self.batchSize, self.noOfPatches, self.embedDimension), dtype=np.float32)
+
+    if (self.classMode == "categorical"):
+      labels = np.zeros((self.batchSize, self.numClasses), dtype=np.float32)
+    else:
+      labels = np.zeros((self.batchSize, 1), dtype=np.int32)
+
+    for i, idx in enumerate(batchIndices):
+      # Load image path and label from DataFrame.
+      row = self.dataFrame.iloc[idx]
+      imgPath = row["image_path"]
+      label = row["label"]
+
+      # Load and validate image.
+      image = cv2.imread(imgPath)
+      if (image is None):
+        raise ValueError(f"Failed to load image: {imgPath}")
+
+      # Convert BGR (OpenCV default) to RGB for model compatibility.
+      image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+      # Resize to expected input dimensions.
+      image = cv2.resize(
+        image,
+        (self.inputShape[1], self.inputShape[0]),  # (width, height) for cv2.resize.
+        interpolation=cv2.INTER_CUBIC
+      )
+
+      # Extract and flatten patches.
+      patches = self._image_to_patches(image)
+      images[i] = patches
+
+      # Encode label.
+      if (self.classMode == "categorical"):
+        labels[i, self.classIndices[label]] = 1.0
+      else:
+        labels[i, 0] = self.classIndices[label]
+
+    # Normalize pixel values to [0, 1].
+    return images / 255.0, labels
+
+  def on_epoch_end(self):
+    '''Callback invoked at the end of each epoch for shuffling.'''
+    if self.shuffle:
+      np.random.shuffle(self.indices)
+
+  def get_class_indices(self):
+    '''Return the mapping from class names to integer indices.'''
+    return self.classIndices.copy()

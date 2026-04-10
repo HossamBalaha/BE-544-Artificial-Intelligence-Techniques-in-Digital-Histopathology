@@ -207,14 +207,17 @@ objFunc = PretrainedModelOptunaObjectiveFunction(
 
 study.optimize(
   objFunc,
-  # Number of hyperparameter combinations to try. Adjust this based on your computational resources and time constraints.
+  # Number of hyperparameter combinations to try. Adjust this based on your computational resources and
+  # time constraints.
   n_trials=10,
   show_progress_bar=True,  # Show a progress bar during the optimization process for better visibility of progress.
   # Garbage collect after each trial to free up memory, especially important when training deep learning models.
   gc_after_trial=True,
-  # Set a timeout of 2 hours (7200 seconds) to prevent excessively long runs. Adjust this based on your expected training time and computational resources.
+  # Set a timeout of 2 hours (7200 seconds) to prevent excessively long runs. Adjust this based on your
+  # expected training time and computational resources.
   timeout=7200,
-  # Number of parallel jobs to run. Set to 1 for sequential execution. Increase this if you have multiple GPUs or want to speed up the search, but be cautious of memory constraints.
+  # Number of parallel jobs to run. Set to 1 for sequential execution. Increase this if you have multiple
+  # GPUs or want to speed up the search, but be cautious of memory constraints.
   n_jobs=1,
 )
 
