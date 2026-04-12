@@ -207,7 +207,7 @@ os.makedirs(outputDir, exist_ok=True)
 # outputDir = f"History/ViT Config4 {whichCategory} {whichMagnification}"
 # os.makedirs(outputDir, exist_ok=True)
 
-# Create generators from DataFrames
+# Create generators from DataFrames.
 trainGen = ViTPatchDataGeneratorFromDataFrame(
   dataFrame=trainDF,
   inputShape=configs["ImageSize"],

@@ -1952,7 +1952,8 @@ def PretrainedVisionTransformerDataFrame(
   # Memory cleanup to avoid issues in environments with limited GPU memory, especially after training and evaluation.
   torch.cuda.empty_cache()
 
-  # Return the trainer object, evaluation metrics, and label mapping for potential further use (e.g., inference or additional evaluation).
+  # Return the trainer object, evaluation metrics, and label mapping for potential further
+  # use (e.g., inference or additional evaluation).
   return trainer, evalMetrics, label2ID
 
 
