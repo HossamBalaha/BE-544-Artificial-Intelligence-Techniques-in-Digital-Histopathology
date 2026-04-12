@@ -8,308 +8,152 @@
 # Permissions and Citation: Refer to the README file.
 '''
 
-import torch, os, tqdm
-import numpy as np
+import torch, os, warnings
 import pandas as pd
-from sklearn.metrics import *
-from datasets import load_dataset
-from PIL import Image
-import matplotlib.pyplot as plt
-from torchvision.transforms import (
-  Compose,
-  RandomResizedCrop,
-  RandomHorizontalFlip,
-  ToTensor,
-  Normalize,
-  Resize,
-  CenterCrop
+from sklearn.model_selection import train_test_split
+from HMB_Spring_2026_Helpers import (
+  PretrainedVisionTransformerDataFrame,
+  VisionTransformerInferenceDataFrame
 )
-from transformers import (
-  ViTForImageClassification,
-  ViTImageProcessor,
-  TrainingArguments,
-  Trainer,
-  AutoFeatureExtractor,
-  AutoModelForImageClassification,
-)
-from HMB_Spring_2026_Helpers import CalculateAllMetrics
 
-def PretrainedVisionTransformer(
-  datasetDir, modelName, outputDir, applyDataAugmentation=True, testSize=0.15,
-  numTrainEpochs=32, batchSize=16, learningRate=2e-4, fp16=True, saveSteps=25,
-  loggingSteps=10,
-):
-  # Define the preprocessing functions.
-  def _PreprocessTrain(exampleBatch):
-    # Convert the images to RGB and apply the transformations.
-    # pixel_values is the tensor that the model expects.
-    exampleBatch["pixel_values"] = [
-      trainTransforms(image.convert("RGB")) for image in exampleBatch["image"]
-    ]
-    return exampleBatch
+# Ignore warnings.
+warnings.filterwarnings("ignore")
+# Check if GPU is available and set the device accordingly.
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", device)
 
-  def _PreprocessVal(exampleBatch):
-    # Convert the images to RGB and apply the transformations.
-    # pixel_values is the tensor that the model expects.
-    exampleBatch["pixel_values"] = [
-      valTransforms(image.convert("RGB")) for image in exampleBatch["image"]
-    ]
-    return exampleBatch
 
-  def _CollateFunc(batch):
-    # Stack the pixel values and convert the labels to tensors.
-    pixelValues = torch.stack([x["pixel_values"] for x in batch])
-    labels = torch.tensor([x["label"] for x in batch])
+def main():
+  # ======================================================================== #
+  # RELATED TO BreakHist DATASET.
+  # ======================================================================== #
+  # Dataset source: https://web.inf.ufpr.br/vri/databases/breast-cancer-histopathological-database-breakhis/
+  whichCategory = "benign"  # Choose between "benign" and "malignant".
+  whichMagnification = "40X"  # Choose between "40X", "100X", "200X", and "400X".
+  classes = ["adenosis", "fibroadenoma", "phyllodes_tumor", "tubular_adenoma"]
+  # Base directory where extracted tiles or ROIs are stored.
+  # Change this path to match your local setup where the BreaKHis dataset is stored.
+  basePath = rf"G:/BreaKHis_v1/histology_slides/breast/{whichCategory}/SOB"
 
-    # pixel_values and labels are the keys that the model expects.
-    return {
-      "pixel_values": pixelValues,
-      "labels"      : labels,
-    }
+  # Check that the base path exists to avoid silent failures.
+  if (not os.path.exists(basePath)):
+    # Raise a clear exception if the expected dataset folder is missing.
+    raise Exception(f"Base path '{basePath}' does not exist.")
+  print(f"Base path '{basePath}' exists. Proceeding with data loading...")
 
-  def _ComputeMetrics(evalPred):
-    # Calculate the confusion matrix and the metrics.
-    predictions = np.argmax(evalPred.predictions, axis=1)
-    references = evalPred.label_ids
-    cm = confusion_matrix(references, predictions)
-    metrics = CalculateAllMetrics(cm)
-    return metrics
+  # Create a dictionary mapping class names to their corresponding directory paths.
+  classPaths = {cls: os.path.join(basePath, cls) for cls in classes}
+  # Verify that all class directories exist before proceeding.
+  for cls, path in classPaths.items():
+    if (not os.path.exists(path)):
+      raise Exception(f"Class path for '{cls}' does not exist at '{path}'.")
+  print("All class paths exist. Proceeding with image loading...")
 
-  # Load the feature extractor and define the normalization.
-  featureExtractor = ViTImageProcessor.from_pretrained(modelName)
-  feSize = list(featureExtractor.size.values())
-  normalize = Normalize(mean=featureExtractor.image_mean, std=featureExtractor.image_std)
+  xFiles = []  # List to hold image data.
+  y = []  # List to hold corresponding labels.
+  # Loop through each class and read images.
+  for cls, path in classPaths.items():
+    cases = os.listdir(path)  # List all cases in the class directory.
+    for case in cases:
+      casePath = os.path.join(path, case)  # Full path to the case directory.
+      if (os.path.isdir(casePath)):  # Ensure it's a directory before listing files.
+        # List all image files in the case directory.
+        imageNames = os.listdir(os.path.join(casePath, whichMagnification))
+        for imgName in imageNames:
+          # Full path to the image file.
+          imgPath = os.path.join(casePath, whichMagnification, imgName)
+          # Verify that the image file exists before attempting to read it.
+          if (not os.path.isfile(imgPath)):
+            raise Exception(f"Image file '{imgPath}' does not exist.")
+          xFiles.append(imgPath)  # Append image data to the list.
+          y.append(cls)  # Append corresponding label to the list.
+  print(f"Loaded {len(xFiles)} images with corresponding labels.")
 
-  # Define the transformations for training and validation.
-  if (applyDataAugmentation):
-    trainTransforms = Compose(
-      [
-        RandomResizedCrop(feSize),  # Apply random resized crop.
-        RandomHorizontalFlip(),  # Apply random horizontal flip.
-        ToTensor(),  # Convert to tensor.
-        normalize,  # Normalize the image.
-      ]
-    )
-  else:
-    trainTransforms = Compose(
-      [
-        Resize(feSize),  # Resize the image.
-        CenterCrop(feSize),  # Center crop the image.
-        ToTensor(),  # Convert to tensor.
-        normalize,  # Normalize the image.
-      ]
-    )
+  # Create a DataFrame to organize image paths and labels for easier handling.
+  dataFrame = pd.DataFrame({
+    "image_path": xFiles,
+    "label"     : y,
+  })
+  print(f"Created DataFrame with {len(dataFrame)} rows.")
+  print("DataFrame head:\n", dataFrame.head())
 
-  valTransforms = Compose(
-    [
-      Resize(feSize),  # Resize the image.
-      CenterCrop(feSize),  # Center crop the image.
-      ToTensor(),  # Convert to tensor.
-      normalize,  # Normalize the image.
-    ]
+  noOfClasses = len(dataFrame["label"].unique())
+  print(f"Number of unique classes: {noOfClasses}")
+
+  # Train-test split of the dataset using sklearn's `train_test_split` function.
+  trainDF, testDF = train_test_split(
+    dataFrame,  # DataFrame containing image paths and labels.
+    test_size=0.2,  # Use 20% of the data for testing and 80% for training.
+    random_state=42,  # Set a random state for reproducibility of the split.
+    stratify=dataFrame["label"],  # Stratify the split based on the labels to maintain class distribution in both sets.
+  )
+  # Further split the training set into training and validation sets.
+  trainDF, valDF = train_test_split(
+    trainDF,  # DataFrame containing training image paths and labels.
+    test_size=0.25,  # Use 25% of the training data for validation (which is 20% of the original data).
+    random_state=42,  # Set a random state for reproducibility of the split.
+    stratify=trainDF["label"],  # Stratify the split based on the labels to maintain class distribution in both sets.
+  )
+  print(f"Training set size: {len(trainDF)}")
+  print(f"Validation set size: {len(valDF)}")
+  print(f"Testing set size: {len(testDF)}")
+
+  # ======================================================================== #
+
+  configs = {
+    # "google/vit-base-patch16-224-in21k",
+    # "google/vit-base-patch16-224",
+    # "google/vit-large-patch16-224",
+    # "google/vit-base-patch32-384",
+    # "google/vit-large-patch32-384",
+    "modelName"            : "google/vit-base-patch16-224-in21k",
+    # Set to True to apply data augmentation during training, which can help improve model generalization
+    # by introducing variability in the training data.
+    "applyDataAugmentation": True,
+    # Use 15% of the data for testing and 85% for training/validation.
+    # Adjust this based on the size of your dataset and the need for a robust evaluation set.
+    "testSize"             : 0.15,
+    # Number of epochs to train the model. Adjust this based on the size of your dataset and computational resources.
+    # More epochs can lead to better performance but may also increase training time and risk of overfitting.
+    "numTrainEpochs"       : 25,
+    # Set the batch size for training.
+    # A larger batch size can speed up training but may require more memory.
+    # Adjust this based on your GPU capabilities and the size of your dataset.
+    "batchSize"            : 32,
+    # Set the learning rate for the optimizer.
+    # A smaller learning rate can lead to more stable training but may require more epochs to converge,
+    # while a larger learning rate can speed up training but may cause instability.
+    # Adjust this based on your dataset and model architecture.
+    "learningRate"         : 5e-4,
+    # Set to True to enable mixed precision training, which can speed up training and reduce memory usage
+    # on compatible hardware (like NVIDIA GPUs with Tensor Cores).
+    "fp16"                 : True,
+    # Set the number of steps between saving model checkpoints.
+    "saveSteps"            : 25,
+    # Set the number of steps between logging training metrics to the console or a logging system.
+    "loggingSteps"         : 25,
+  }
+
+  trainer, valMetrics, labelMapping = PretrainedVisionTransformerDataFrame(
+    trainDF=trainDF,  # Training DataFrame.
+    valDF=valDF,  # Validation DataFrame.
+    testDF=testDF,  # Optional: Test DataFrame for early evaluation.
+    modelName=configs["modelName"],
+    outputDir="./History/ViT-Base-BreaKHis",
+    applyDataAugmentation=configs["applyDataAugmentation"],
+    numTrainEpochs=configs["numTrainEpochs"],
+    batchSize=configs["batchSize"],
+    learningRate=configs["learningRate"],
+    fp16=configs["fp16"],
+    saveSteps=configs["saveSteps"],
+    loggingSteps=configs["loggingSteps"],
   )
 
-  # Load the dataset and get the training subset.
-  ds = load_dataset("imagefolder", data_dir=datasetDir)
-  ds = ds["train"]
-  print("DS:", ds)
-
-  # Split the dataset into training and validation.
-  data = ds.train_test_split(test_size=testSize)
-  trainDS = data["train"]
-  valDS = data["val"]
-
-  print("Train:", trainDS)
-  print("Val:", valDS)
-
-  # Apply the transformations to the training and validation datasets.
-  trainDS.set_transform(_PreprocessTrain)
-  valDS.set_transform(_PreprocessVal)
-
-  # Define the labels.
-  labels = data["train"].features["label"].names
-
-  # Define the label mappings.
-  label2ID, id2Label = dict(), dict()
-
-  # Create the label mappings.
-  for i, label in enumerate(labels):
-    label2ID[label] = i  # Update the label to ID mapping.
-    id2Label[i] = label  # Update the ID to label mapping.
-
-  # Load the model and define the training arguments.
-  model = ViTForImageClassification.from_pretrained(
-    modelName,  # Load the model.
-    num_labels=len(labels),  # Define the number of labels.
-    id2label={str(i): c for i, c in enumerate(labels)},  # Define the ID to label mapping.
-    label2id={c: str(i) for i, c in enumerate(labels)},  # Define the label to ID mapping.
-    ignore_mismatched_sizes=True,  # Ignore mismatched sizes.
+  testResults = VisionTransformerInferenceDataFrame(
+    testDF=testDF,  # Test DataFrame with "image_path" and "label".
+    outputDir="./History/ViT-Base-BreaKHis",
   )
 
-  # Define the training arguments.
-  trainingArgs = TrainingArguments(
-    output_dir=outputDir,  # Define the output directory.
-    per_device_train_batch_size=batchSize,  # Define the batch size.
-    evaluation_strategy="steps",  # Define the evaluation strategy.
-    num_train_epochs=numTrainEpochs,  # Define the number of training epochs.
-    fp16=fp16,  # Define the mixed precision training.
-    save_steps=saveSteps,  # Define the save steps.
-    eval_steps=saveSteps,  # Define the evaluation steps.
-    logging_steps=loggingSteps,  # Define the logging steps.
-    learning_rate=learningRate,  # Define the learning rate.
-    save_total_limit=2,  # Define the total number of checkpoints to save.
-    remove_unused_columns=False,  # Remove unused columns.
-    push_to_hub=False,  # Push to the hub.
-    report_to="tensorboard",  # Report to tensorboard.
-    load_best_model_at_end=True,  # Load the best model at the end.
-    log_level="error",  # Define the log level.
-  )
 
-  # Create the trainer and train the model.
-  trainer = Trainer(
-    model,  # Define the model.
-    trainingArgs,  # Define the training arguments.
-    train_dataset=trainDS,  # Define the training dataset.
-    eval_dataset=valDS,  # Define the evaluation dataset.
-    tokenizer=featureExtractor,  # Define the tokenizer.
-    compute_metrics=_ComputeMetrics,  # Define the compute metrics function.
-    data_collator=_CollateFunc,  # Define the data collator.
-  )
-
-  # Train the model.
-  trainResults = trainer.train()
-
-  # Save the model and the metrics.
-  trainer.save_model()
-
-  # Log and save the metrics.
-  trainer.log_metrics("train", trainResults.metrics)
-  trainer.save_metrics("train", trainResults.metrics)
-
-  # Evaluate the model and save the metrics.
-  trainer.save_state()
-  metrics = trainer.evaluate()
-  trainer.log_metrics("eval", metrics)
-  trainer.save_metrics("eval", metrics)
-
-  # Clear the cache to avoid memory issues.
-  torch.cuda.empty_cache()
-
-
-def VisionTransformerInference(imagesBasePath, outputDir, splitType="test"):
-  # Load the feature extractor and the model.
-  classes = os.listdir(os.path.join(imagesBasePath, splitType))
-  featureExtractorX = AutoFeatureExtractor.from_pretrained(outputDir)
-  modelX = AutoModelForImageClassification.from_pretrained(outputDir)
-
-  results = []
-
-  # no_grad means that the gradients are not calculated.
-  with torch.no_grad():
-    # Iterate over the classes.
-    for cls in classes:
-      # Get the class path and the files.
-      clsPath = os.path.join(imagesBasePath, splitType, cls)
-      files = os.listdir(clsPath)
-
-      # Iterate over the files.
-      for i in tqdm.tqdm(range(len(files))):
-        # Get the image path and the extension.
-        imagePath = os.path.join(clsPath, files[i])
-        extension = imagePath.split(".")[-1]
-        if (extension not in ["png", "jpg", "bmp", "jpeg", "tiff", "tif"]):
-          continue
-
-        # Open the image and extract the features.
-        image = Image.open(imagePath).convert('RGB')
-        features = featureExtractorX(image, return_tensors="pt")
-
-        # Apply the model and get the logits.
-        outputs = modelX(**features)
-        logits = outputs.logits
-
-        # Get the probabilities and the predicted class.
-        # softmax(-1) as the probabilities are in the last dimension.
-        prob = logits.softmax(-1).max().item()
-        probabilities = logits.softmax(-1).tolist()[0]
-        predictedClassIDx = logits.argmax(-1).item()
-
-        # Get the predicted class.
-        predictedCls = modelX.config.id2label[predictedClassIDx]
-
-        # Store the results.
-        recordToStore = {
-          "Image Name"        : files[i],
-          "Actual Class"      : cls,
-          "Predicted Class ID": predictedClassIDx,
-          "Predicted Class"   : predictedCls,
-          "Probability"       : prob,
-          "Probabilities"     : probabilities,
-        }
-        results.append(recordToStore)
-
-  # Save the results.
-  df = pd.DataFrame.from_dict(results)
-  df.to_csv(os.path.join(outputDir, f"{splitType.capitalize()}_Results.csv"), index=False)
-
-  references = df["Actual Class"]
-  predictions = df["Predicted Class"]
-
-  cm = confusion_matrix(references, predictions)
-  disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=classes)
-  disp.plot()
-  plt.savefig(os.path.join(outputDir, f"{splitType.capitalize()}_ConfusionMatrix.png"))
-  plt.show()
-  plt.close()
-
-  # Calculate all metrics.
-  results = CalculateAllMetricsUpdated(cm)
-  df = pd.DataFrame.from_dict(results, orient="index", columns=["Value"])
-  df.to_csv(os.path.join(outputDir, f"{splitType.capitalize()}_Metrics.csv"))
-
-  # Clear the cache to avoid memory issues.
-  torch.cuda.empty_cache()
-
-
-configs = {
-  "applyDataAugmentation": True,
-  "testSize"             : 0.15,
-  "numTrainEpochs"       : 5,
-  "batchSize"            : 32,
-  "learningRate"         : 5e-4,
-  "fp16"                 : True,
-  "saveSteps"            : 250,
-  "loggingSteps"         : 100,
-}
-
-modelNames = [
-  "google/vit-base-patch16-224-in21k",
-  # "google/vit-base-patch16-224",
-  # "google/vit-large-patch16-224",
-  # "google/vit-base-patch32-384",
-  # "google/vit-large-patch32-384",
-]
-
-bs = configs["batchSize"]
-aug = "Aug" if configs["applyDataAugmentation"] else "NoAug"
-outputDirs = [
-  rf"./History/ViT-Base-{bs}-{aug}-P16-224-In21K",
-  # rf"./History/ViT-Base-{bs}-{aug}-P16-224",
-  # rf"./History/ViT-Large-{bs}-{aug}-P16-224",
-  # rf"./History/ViT-Base-{bs}-{aug}-P32-384",
-  # rf"./History/ViT-Large-{bs}-{aug}-P32-384",
-]
-
-basePath = r"BACH Updated Extracted\ROIs_0_256_256_32_32"
-splitFolder = r"BACH Updated Extracted\ROIs_0_256_256_32_32_Split"
-
-for (modelName, outputDir) in zip(modelNames, outputDirs):
-  try:
-    print("Started to Work...")
-    print("Model Name:", modelName)
-    print("Output Dir:", outputDir)
-    PretrainedVisionTransformer(splitFolder, modelName, outputDir, **configs)
-    VisionTransformerInference(splitFolder, outputDir, splitType="test")
-  except Exception as e:
-    print(e)
-    continue
+if (__name__ == "__main__"):
+  main()

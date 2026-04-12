@@ -25,13 +25,17 @@
 # # -------------------------------------------------- #
 
 # Import necessary libraries.
-import os, cv2, openslide, tqdm, patchify
+import os, cv2, openslide, tqdm, patchify, torch
 import numpy as np
+import pandas as pd
+from PIL import Image
+import tensorflow as tf
+import keras_tuner as kt
+from sklearn.metrics import *
 import matplotlib.pyplot as plt
+from datasets import load_dataset, Dataset
 import xml.etree.ElementTree as ET
 from shapely.geometry import Polygon
-import keras_tuner as kt
-import tensorflow as tf
 from tensorflow.keras.layers import *
 from tensorflow.keras.models import *
 from tensorflow.keras.losses import *
@@ -42,6 +46,23 @@ from tensorflow.keras.applications import *
 from tensorflow.keras.backend import clear_session
 from tensorflow.keras import backend as K
 from tensorflow.keras.utils import Sequence
+from torchvision.transforms import (
+  Compose,
+  RandomResizedCrop,
+  RandomHorizontalFlip,
+  ToTensor,
+  Normalize,
+  Resize,
+  CenterCrop
+)
+from transformers import (
+  ViTForImageClassification,
+  ViTImageProcessor,
+  TrainingArguments,
+  Trainer,
+  AutoFeatureExtractor,
+  AutoModelForImageClassification,
+)
 
 
 def ExtractBACHAnnotationsFromXML(xmlFile, verbose=True):
@@ -719,12 +740,12 @@ def IsBackgroundTile(
   isBackground = backgroundScore >= 3
 
   return isBackground, {
-    'entropy'        : entropyValue,
-    'colorVariance'  : colorVariance,
-    'tissueRatio'    : tissueRatio,
-    'meanSaturation' : meanSaturation,
-    'textureVariance': textureVariance,
-    'backgroundScore': backgroundScore,
+    "entropy"        : entropyValue,
+    "colorVariance"  : colorVariance,
+    "tissueRatio"    : tissueRatio,
+    "meanSaturation" : meanSaturation,
+    "textureVariance": textureVariance,
+    "backgroundScore": backgroundScore,
   }
 
 
@@ -860,7 +881,7 @@ def PretrainedModelBuilderKT(inputShape=(256, 256, 3), noOfClasses=4):
     # without the top classification layer.
     selectedModel = hp["baseModel"]
     baseModel = baseModelCls[selectedModel](
-      # Exclude default classification head; we'll add a custom head.
+      # Exclude default classification head; we will add a custom head.
       include_top=False,
       # Initialize with ImageNet weights.
       weights="imagenet",
@@ -975,7 +996,7 @@ def PretrainedModelOptuna(
   # Instantiate the selected base model with pretrained ImageNet weights and
   # without the top classification layer.
   baseModel = baseModelCls[baseModelStr](
-    # Exclude default classification head; we'll add a custom head.
+    # Exclude default classification head; we will add a custom head.
     include_top=False,
     # Initialize with ImageNet weights.
     weights="imagenet",
@@ -1199,7 +1220,7 @@ def BasicVisionTransformer(configs):
   return model
 
 
-def ImageToPatches(image, noOfPatches, patchSize):
+def ImageToViTPatches(image, noOfPatches, patchSize):
   patches = patchify.patchify(image, (patchSize, patchSize, 3), step=patchSize)
   patches = patches.reshape(-1, patchSize, patchSize, 3)
   patches = patches[:noOfPatches]
@@ -1207,7 +1228,7 @@ def ImageToPatches(image, noOfPatches, patchSize):
   return patches
 
 
-class PatchDataGeneratorFromFolder(Sequence):
+class ViTPatchDataGeneratorFromFolder(Sequence):
 
   def __init__(
     self, folder, inputShape, batchSize, classMode="categorical",
@@ -1255,7 +1276,7 @@ class PatchDataGeneratorFromFolder(Sequence):
 
       image = cv2.imread(image)
       image = cv2.resize(image, (self.inputShape[1], self.inputShape[0]), interpolation=cv2.INTER_CUBIC)
-      patches = ImageToPatches(image, self.noOfPatches, self.patchSize)
+      patches = ImageToViTPatches(image, self.noOfPatches, self.patchSize)
 
       images[i] = patches
 
@@ -1283,14 +1304,14 @@ def CreatePatchDataGenerators(folder, inputShape, batchSize, **kwargs):
   valFolder = os.path.join(folder, "val")
   testFolder = os.path.join(folder, "test")
 
-  trainGen = PatchDataGeneratorFromFolder(trainFolder, inputShape, batchSize, shuffle=True, **kwargs)
-  valGen = PatchDataGeneratorFromFolder(valFolder, inputShape, batchSize, **kwargs)
-  testGen = PatchDataGeneratorFromFolder(testFolder, inputShape, batchSize, **kwargs)
+  trainGen = ViTPatchDataGeneratorFromFolder(trainFolder, inputShape, batchSize, shuffle=True, **kwargs)
+  valGen = ViTPatchDataGeneratorFromFolder(valFolder, inputShape, batchSize, **kwargs)
+  testGen = ViTPatchDataGeneratorFromFolder(testFolder, inputShape, batchSize, **kwargs)
 
   return trainGen, valGen, testGen
 
 
-class PatchDataGeneratorFromDataFrame(Sequence):
+class ViTPatchDataGeneratorFromDataFrame(Sequence):
   '''
   Keras Sequence generator for Vision Transformer training using a pandas DataFrame.
   This generator loads images from file paths specified in a DataFrame, extracts
@@ -1303,9 +1324,9 @@ class PatchDataGeneratorFromDataFrame(Sequence):
     noOfPatches=256, patchSize=16, embedDimension=768, shuffle=False,
   ):
     # Validate required DataFrame columns.
-    required_cols = {"image_path", "label"}
-    if (not required_cols.issubset(dataFrame.columns)):
-      raise ValueError(f"DataFrame must contain columns: {required_cols}")
+    requiredCols = {"image_path", "label"}
+    if (not requiredCols.issubset(dataFrame.columns)):
+      raise ValueError(f"DataFrame must contain columns: {requiredCols}")
 
     self.dataFrame = dataFrame.reset_index(drop=True)
     self.inputShape = inputShape
@@ -1320,17 +1341,21 @@ class PatchDataGeneratorFromDataFrame(Sequence):
     self.classes = sorted(dataFrame["label"].unique())
     self.classIndices = {label: idx for idx, label in enumerate(self.classes)}
     self.numClasses = len(self.classes)
+    self.yTrue = dataFrame["label"].values
+    self.yTrueIndices = np.array([self.classIndices[label] for label in self.yTrue])
 
     self.numImages = len(self.dataFrame)
     self.indices = np.arange(self.numImages)
 
-    # Warn about dropped samples if batch size doesn't divide evenly.
+    # Warn about dropped samples if batch size does not divide evenly.
     remainder = self.numImages % self.batchSize
     if (remainder != 0):
       print(
         f"Warning: {remainder} samples will be dropped per epoch "
         f"(batchSize={batchSize}, total={self.numImages})"
       )
+      self.yTrue = self.yTrue[:-remainder]
+      self.yTrueIndices = self.yTrueIndices[:-remainder]
 
     if (self.shuffle):
       np.random.shuffle(self.indices)
@@ -1411,3 +1436,699 @@ class PatchDataGeneratorFromDataFrame(Sequence):
   def get_class_indices(self):
     '''Return the mapping from class names to integer indices.'''
     return self.classIndices.copy()
+
+
+def PretrainedVisionTransformer(
+  datasetDir, modelName, outputDir, applyDataAugmentation=True, testSize=0.15,
+  numTrainEpochs=32, batchSize=16, learningRate=2e-4, fp16=True, saveSteps=25,
+  loggingSteps=10,
+):
+  # ========================================================================
+  # PREPROCESSING FUNCTIONS
+  # ========================================================================
+  # The Trainer expects batches with keys `pixel_values` and `labels`. We define
+  # small helper functions for transforming images for training/validation,
+  # collating batches for the Trainer, and computing evaluation metrics.
+  def _PreprocessTrain(exampleBatch):
+    # Convert the images to RGB and apply the training transforms. The
+    # resulting `pixel_values` key contains tensors the model expects.
+    exampleBatch["pixel_values"] = [
+      trainTransforms(image.convert("RGB")) for image in exampleBatch["image"]
+    ]
+    return exampleBatch
+
+  def _PreprocessVal(exampleBatch):
+    # Convert the images to RGB and apply the validation transforms. The
+    # resulting `pixel_values` key contains tensors the model expects.
+    exampleBatch["pixel_values"] = [
+      valTransforms(image.convert("RGB")) for image in exampleBatch["image"]
+    ]
+    return exampleBatch
+
+  def _CollateFunc(batch):
+    # Collate function used by the Trainer: stack pixel tensors and convert
+    # labels to a torch tensor. Returned dict matches the model's input API.
+    pixelValues = torch.stack([x["pixel_values"] for x in batch])
+    labels = torch.tensor([x["label"] for x in batch])
+    return {"pixel_values": pixelValues, "labels": labels}
+
+  def _ComputeMetrics(evalPred):
+    # Compute predictions -> confusion matrix -> extended metrics using the
+    # project's helper `CalculateAllMetrics` to keep evaluation consistent.
+    predictions = np.argmax(evalPred.predictions, axis=1)
+    references = evalPred.label_ids
+    cm = confusion_matrix(references, predictions)
+    metrics = CalculateAllMetrics(cm)
+    return metrics
+
+  # ========================================================================
+  # FEATURE EXTRACTOR AND TRANSFORMS
+  # ========================================================================
+  # Load the ViT feature extractor to obtain the expected input size and the
+  # normalization parameters. These are used to build consistent torchvision
+  # transforms for training and validation.
+  featureExtractor = ViTImageProcessor.from_pretrained(modelName)
+  feSize = (featureExtractor.size.get("height"), featureExtractor.size.get("width"))
+  normalize = Normalize(mean=featureExtractor.image_mean, std=featureExtractor.image_std)
+
+  # Build torchvision transforms for training and validation. When augmentation
+  # is enabled we use RandomResizedCrop + horizontal flip, otherwise deterministic
+  # Resize + CenterCrop to match validation behavior.
+  if (applyDataAugmentation):
+    trainTransforms = Compose([
+      RandomResizedCrop(feSize),
+      RandomHorizontalFlip(),
+      ToTensor(),
+      normalize,
+    ])
+  else:
+    trainTransforms = Compose([
+      Resize(feSize),
+      CenterCrop(feSize),
+      ToTensor(),
+      normalize,
+    ])
+
+  valTransforms = Compose([
+    Resize(feSize),
+    CenterCrop(feSize),
+    ToTensor(),
+    normalize,
+  ])
+
+  # Load the dataset and get the training subset.
+  ds = load_dataset("imagefolder", data_dir=datasetDir)
+  ds = ds["train"]
+  print("DS:", ds)
+
+  # Split the dataset into training and validation.
+  data = ds.train_test_split(test_size=testSize)
+  trainDS = data["train"]
+  valDS = data["val"]
+
+  print("Train:", trainDS)
+  print("Val:", valDS)
+
+  # Apply the transformations to the training and validation datasets.
+  trainDS.set_transform(_PreprocessTrain)
+  valDS.set_transform(_PreprocessVal)
+
+  # Define the labels.
+  labels = data["train"].features["label"].names
+
+  # Define the label mappings.
+  label2ID, id2Label = dict(), dict()
+
+  # Create the label mappings.
+  for i, label in enumerate(labels):
+    label2ID[label] = i  # Update the label to ID mapping.
+    id2Label[i] = label  # Update the ID to label mapping.
+
+  # Load the model and define the training arguments.
+  model = ViTForImageClassification.from_pretrained(
+    modelName,  # Load the model.
+    num_labels=len(labels),  # Define the number of labels.
+    id2label=id2Label,  # Define the ID to label mapping.
+    label2id=label2ID,  # Define the label to ID mapping.
+    ignore_mismatched_sizes=True,  # Ignore mismatched sizes.
+  )
+
+  # Define the training arguments.
+  trainingArgs = TrainingArguments(
+    output_dir=outputDir,  # Define the output directory.
+    per_device_train_batch_size=batchSize,  # Define the batch size.
+    eval_strategy="steps",  # Define the evaluation strategy.
+    num_train_epochs=numTrainEpochs,  # Define the number of training epochs.
+    fp16=fp16,  # Define the mixed precision training.
+    save_steps=saveSteps,  # Define the save steps.
+    eval_steps=saveSteps,  # Define the evaluation steps.
+    logging_steps=loggingSteps,  # Define the logging steps.
+    learning_rate=learningRate,  # Define the learning rate.
+    save_total_limit=2,  # Define the total number of checkpoints to save.
+    remove_unused_columns=False,  # Remove unused columns.
+    push_to_hub=False,  # Push to the hub.
+    report_to="tensorboard",  # Report to tensorboard.
+    load_best_model_at_end=True,  # Load the best model at the end.
+    log_level="error",  # Define the log level.
+  )
+
+  # Create the trainer and train the model.
+  trainer = Trainer(
+    model,  # Define the model.
+    trainingArgs,  # Define the training arguments.
+    train_dataset=trainDS,  # Define the training dataset.
+    eval_dataset=valDS,  # Define the evaluation dataset.
+    processing_class=featureExtractor,  # Define the tokenizer.
+    compute_metrics=_ComputeMetrics,  # Define the compute metrics function.
+    data_collator=_CollateFunc,  # Define the data collator.
+  )
+
+  # Train the model.
+  trainResults = trainer.train()
+
+  # Save the model and the metrics.
+  trainer.save_model()
+
+  # Log and save the metrics.
+  trainer.log_metrics("train", trainResults.metrics)
+  trainer.save_metrics("train", trainResults.metrics)
+
+  # Evaluate the model and save the metrics.
+  trainer.save_state()
+  metrics = trainer.evaluate()
+  trainer.log_metrics("eval", metrics)
+  trainer.save_metrics("eval", metrics)
+
+  # Clear the cache to avoid memory issues.
+  torch.cuda.empty_cache()
+
+
+def VisionTransformerInference(imagesBasePath, outputDir, splitType="test"):
+  # ========================================================================
+  # MODEL & FEATURE EXTRACTOR LOADING
+  # ========================================================================
+  # Load the fine-tuned model and its corresponding feature extractor from the
+  # specified output directory. The `imagesBasePath` directory is expected to
+  # contain subfolders for the dataset split (e.g., train/val/test) and class
+  # subfolders within that split.
+  classes = os.listdir(os.path.join(imagesBasePath, splitType))
+  featureExtractorX = AutoFeatureExtractor.from_pretrained(outputDir)
+  modelX = AutoModelForImageClassification.from_pretrained(outputDir)
+
+  results = []
+
+  # ========================================================================
+  # INFERENCE LOOP
+  # ========================================================================
+  # Perform batched inference with gradients disabled to reduce memory usage.
+  with torch.no_grad():
+    # Iterate over each ground-truth class folder and run the model on supported
+    # image files found inside. We collect predicted label, probability and other
+    # diagnostic information for each image.
+    for cls in classes:
+      clsPath = os.path.join(imagesBasePath, splitType, cls)
+      files = os.listdir(clsPath)
+
+      for i in tqdm.tqdm(range(len(files))):
+        imagePath = os.path.join(clsPath, files[i])
+        extension = imagePath.split(".")[-1].lower()
+        if (extension not in ["png", "jpg", "bmp", "jpeg", "tiff", "tif"]):
+          continue
+
+        # Load image and prepare inputs using the feature extractor.
+        image = Image.open(imagePath).convert("RGB")
+        features = featureExtractorX(image, return_tensors="pt")
+
+        # Run the model to obtain logits and derive probabilities/prediction.
+        outputs = modelX(**features)
+        logits = outputs.logits
+        prob = logits.softmax(-1).max().item()
+        probabilities = logits.softmax(-1).tolist()[0]
+        predictedClassIDx = logits.argmax(-1).item()
+        predictedCls = modelX.config.id2label[predictedClassIDx]
+
+        # Append the inference record for later aggregation and saving.
+        recordToStore = {
+          "Image Name"        : files[i],
+          "Actual Class"      : cls,
+          "Predicted Class ID": predictedClassIDx,
+          "Predicted Class"   : predictedCls,
+          "Probability"       : prob,
+          "Probabilities"     : probabilities,
+        }
+        results.append(recordToStore)
+
+  # Save the results.
+  df = pd.DataFrame.from_dict(results)
+  df.to_csv(os.path.join(outputDir, f"{splitType.capitalize()}_Results.csv"), index=False)
+
+  references = df["Actual Class"]
+  predictions = df["Predicted Class"]
+
+  cm = confusion_matrix(references, predictions)
+  disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=classes)
+  disp.plot()
+  plt.savefig(os.path.join(outputDir, f"{splitType.capitalize()}_ConfusionMatrix.png"))
+  plt.show()
+  plt.close()
+
+  # Calculate all metrics.
+  results = CalculateAllMetrics(cm)
+  df = pd.DataFrame.from_dict(results, orient="index", columns=["Value"])
+  df.to_csv(os.path.join(outputDir, f"{splitType.capitalize()}_Metrics.csv"))
+
+  # Clear the cache to avoid memory issues.
+  torch.cuda.empty_cache()
+
+
+def PretrainedVisionTransformerDataFrame(
+  trainDF=None,  # Pandas DataFrame containing training data with columns "image_path" and "label".
+  valDF=None,  # Pandas DataFrame containing validation data with columns "image_path" and "label".
+  # Pandas DataFrame containing test data with columns "image_path" and "label".
+  # Optional, can be used for final evaluation after training.
+  testDF=None,
+  modelName=None,  # Name of the pretrained ViT model to use (e.g., "google/vit-base-patch16-224").
+  outputDir=None,  # Directory to save the trained model and results.
+  applyDataAugmentation=True,  # Whether to apply data augmentation to the training dataset.
+  numTrainEpochs=32,  # Number of epochs to train the model.
+  batchSize=16,  # Batch size for training and evaluation.
+  learningRate=2e-4,  # Learning rate for the optimizer.
+  fp16=True,  # Enable mixed precision training for faster performance on compatible GPUs.
+  saveSteps=25,  # Control how often checkpoints are saved during training.
+  loggingSteps=10,  # Control how often metrics are logged during training.
+):
+  # Validate required inputs.
+  if (trainDF is None or valDF is None):
+    raise ValueError("Both 'trainDF' and 'valDF' must be provided.")
+
+  requiredCols = {"image_path", "label"}
+  for name, df in [("trainDF", trainDF), ("valDF", valDF)]:
+    if (not requiredCols.issubset(df.columns)):
+      raise ValueError(f"{name} must contain columns: {requiredCols}")
+
+  # ========================================================================
+  # PREPROCESSING FUNCTIONS
+  # ========================================================================
+  def _PreprocessTrain(exampleBatch):
+    """Apply training transforms to a batch of PIL Images."""
+    exampleBatch["pixel_values"] = [
+      trainTransforms(image.convert("RGB"))
+      for image in exampleBatch["image"]
+    ]
+    return exampleBatch
+
+  def _PreprocessVal(exampleBatch):
+    """Apply validation transforms to a batch of PIL Images."""
+    exampleBatch["pixel_values"] = [
+      valTransforms(image.convert("RGB"))
+      for image in exampleBatch["image"]
+    ]
+    return exampleBatch
+
+  def _CollateFunc(batch):
+    """Collate function for DataLoader: stacks pixel values and labels."""
+    # Stack the pixel values and convert labels to tensors. The model expects "pixel_values" and "labels" keys.
+    pixelValues = torch.stack([x["pixel_values"] for x in batch])
+    # Convert labels to tensor. Assuming labels are already mapped to integer IDs in the dataset.
+    labels = torch.tensor([x["label"] for x in batch])
+    # Return a dictionary with the keys expected by the model.
+    return {"pixel_values": pixelValues, "labels": labels}
+
+  def _ComputeMetrics(evalPred):
+    """Compute evaluation metrics from predictions."""
+    # Convert model predictions to class indices and compute the confusion matrix against true labels.
+    predictions = np.argmax(evalPred.predictions, axis=1)
+    # references are the true labels (integer IDs) from the evaluation dataset.
+    references = evalPred.label_ids
+    # Compute the confusion matrix using sklearn's function, which compares the true labels with the predicted labels.
+    cm = confusion_matrix(references, predictions)
+    # Calculate all relevant metrics from the confusion matrix using a helper function.
+    return CalculateAllMetrics(cm)
+
+  # ========================================================================
+  # FEATURE EXTRACTOR AND TRANSFORMS
+  # ========================================================================
+  # Load the feature extractor to get the expected input size and normalization parameters.
+  featureExtractor = ViTImageProcessor.from_pretrained(modelName)
+  # Extract the expected input size for the model from the feature extractor configuration.
+  feSize = (featureExtractor.size.get("height"), featureExtractor.size.get("width"))
+
+  normalize = Normalize(
+    mean=featureExtractor.image_mean,  # Normalize using the feature extractor's mean and std.
+    std=featureExtractor.image_std  # This ensures the input images are scaled appropriately for the pretrained model.
+  )
+
+  if (applyDataAugmentation):
+    # Apply data augmentation for training: random resized crop and horizontal flip.
+    trainTransforms = Compose([
+      RandomResizedCrop(feSize),  # Randomly crop and resize the image to the expected input size.
+      RandomHorizontalFlip(),  # Randomly flip the image horizontally with a default probability of 0.5.
+      ToTensor(),  # Convert the PIL Image to a PyTorch tensor.
+      normalize,  # Normalize the tensor using the mean and std from the feature extractor.
+    ])
+  else:
+    # Use deterministic transforms for training if augmentation is not applied.
+    trainTransforms = Compose([
+      Resize(feSize),  # Resize the image to the expected input size.
+      CenterCrop(feSize),  # Center crop the image to the expected input size.
+      ToTensor(),  # Convert the PIL Image to a PyTorch tensor.
+      normalize,  # Normalize the tensor using the mean and std from the feature extractor.
+    ])
+
+  # Use deterministic transforms for validation (no augmentation).
+  valTransforms = Compose([
+    Resize(feSize),  # Resize the image to the expected input size.
+    CenterCrop(feSize),  # Center crop the image to the expected input size.
+    ToTensor(),  # Convert the PIL Image to a PyTorch tensor.
+    normalize,  # Normalize the tensor using the mean and std from the feature extractor.
+  ])
+
+  # ========================================================================
+  # DATASET CREATION FROM DATAFRAMES
+  # ========================================================================
+  def _CreateHFDataset(df, labelMapping):
+    """Convert pandas DataFrame to Hugging Face Dataset with consistent labels."""
+    # HF Dataset expects integer labels, so we map string labels to integer IDs using the provided label mapping.
+    # HF means that the "label" column in the DataFrame must be converted to integer IDs that correspond to the
+    # training set's label mapping.
+
+    # Map string labels to integer IDs using training-derived mapping.
+    dfCopy = df.copy()
+    dfCopy["label_id"] = dfCopy["label"].astype(str).map(labelMapping)
+
+    # Remove any unmapped labels (should not happen with proper splits).
+    if (dfCopy["label_id"].isna().any()):
+      unmapped = dfCopy[dfCopy["label_id"].isna()]["label"].unique()
+      raise ValueError(f"Labels not in training set: {unmapped}")
+
+    # Create HF Dataset from DataFrame.
+    hfDs = Dataset.from_pandas(
+      dfCopy[["image_path", "label_id"]].rename(columns={"label_id": "label"})
+    )
+
+    # Load PIL Images into dataset.
+    def _LoadImage(example):
+      try:
+        example["image"] = Image.open(example["image_path"]).convert("RGB")
+      except Exception as e:
+        raise ValueError(f"Failed to load '{example['image_path']}': {e}")
+      return example
+
+    hfDs = hfDs.map(_LoadImage, num_proc=1, desc="Loading images")
+    return hfDs
+
+  # Build label mapping from training data ONLY (ensures consistency).
+  trainLabels = sorted(trainDF["label"].astype(str).unique())
+  # Create label to ID and ID to label mappings based on the training labels.
+  label2ID = {label: idx for idx, label in enumerate(trainLabels)}
+  id2Label = {idx: label for label, idx in label2ID.items()}
+
+  # Create HF datasets for training and validation.
+  trainDS = _CreateHFDataset(trainDF, label2ID)
+  valDS = _CreateHFDataset(valDF, label2ID)
+
+  print(f"Classes ({len(trainLabels)}): {trainLabels}")
+  print(f"Label mapping: {label2ID}")
+  print(f"Training samples: {len(trainDS)}, Validation samples: {len(valDS)}")
+
+  # Apply transforms to the datasets. The transforms will be applied on-the-fly during training and evaluation.
+  trainDS.set_transform(_PreprocessTrain)
+  valDS.set_transform(_PreprocessVal)
+
+  # ========================================================================
+  # MODEL INITIALIZATION
+  # ========================================================================
+  # Load the pretrained ViT model for image classification, specifying the number of labels and the label mappings.
+  model = ViTForImageClassification.from_pretrained(
+    modelName,  # Load the pretrained model.
+    num_labels=len(trainLabels),  # Set the number of labels based on the training set.
+    id2label=id2Label,  # HF requires string keys.
+    label2id=label2ID,  # Map label (str) -> id (int) as required by HF.
+    # Allows loading pretrained weights even if the classification head size differs from the
+    # pretrained model's original head.
+    ignore_mismatched_sizes=True,
+  )
+
+  # ========================================================================
+  # TRAINING CONFIGURATION
+  # ========================================================================
+  # Define the training arguments for the Hugging Face Trainer, including output directory, batch size, number of
+  # epochs, learning rate, and evaluation strategy.
+  trainingArgs = TrainingArguments(
+    output_dir=outputDir,  # Directory where the model checkpoints and logs will be saved.
+    per_device_train_batch_size=batchSize,  # Batch size for training. Adjust based on GPU memory.
+    eval_strategy="steps",  # Evaluate the model every "save_steps" during training.
+    num_train_epochs=numTrainEpochs,  # Total number of training epochs.
+    fp16=fp16,  # Use mixed precision training if True (requires compatible hardware).
+    save_steps=saveSteps,  # Save a checkpoint every "save_steps" during training.
+    eval_steps=saveSteps,  # Evaluate the model every "save_steps" during training.
+    logging_steps=loggingSteps,  # Log training metrics every "logging_steps" during training.
+    learning_rate=learningRate,  # Learning rate for the optimizer.
+    save_total_limit=2,  # Maximum number of checkpoints to keep. Older checkpoints will be deleted.
+    # Do not remove unused columns from the dataset (important for custom collate function).
+    remove_unused_columns=False,
+    push_to_hub=False,  # Do not push the model to the Hugging Face Hub.
+    report_to="tensorboard",  # Report training metrics to TensorBoard for visualization.
+    load_best_model_at_end=True,  # Load the best model (based on evaluation metric) at the end of training.
+    metric_for_best_model="eval_loss",  # Use evaluation loss to determine the best model (lower is better).
+    greater_is_better=False,  # Since we want to minimize "eval_loss", set "greater_is_better" to False.
+    # Set log level to "error" to reduce verbosity (can be adjusted to "info" or "debug" for more detailed logs).
+    log_level="error",
+  )
+
+  # ========================================================================
+  # TRAINER INITIALIZATION AND TRAINING
+  # ========================================================================
+  # Initialize the Hugging Face Trainer with the model, training arguments, datasets, feature extractor
+  # for tokenization, custom metric computation function, and custom data collator.
+  trainer = Trainer(
+    model=model,  # The model to be trained.
+    args=trainingArgs,  # The training arguments defined above.
+    train_dataset=trainDS,  # The training dataset created from the training DataFrame.
+    eval_dataset=valDS,  # The validation dataset created from the validation DataFrame.
+    # The feature extractor is used as the tokenizer for the Trainer, which will handle the preprocessing of images.
+    processing_class=featureExtractor,
+    # The function to compute evaluation metrics from the model's predictions during evaluation.
+    compute_metrics=_ComputeMetrics,
+    # The custom collate function to prepare batches of data for the model during training and evaluation.
+    data_collator=_CollateFunc,
+  )
+
+  print("Starting training...")
+  # Train the model using the Trainer's train method, which will handle the training loop,
+  # evaluation, and checkpointing based on the defined training arguments.
+  trainResults = trainer.train()
+
+  # ========================================================================
+  # SAVE MODEL AND LOG METRICS
+  # ========================================================================
+  # After training, save the final model to the specified output directory. The Trainer's `save_model` method
+  # will save the model weights and configuration.
+  os.makedirs(outputDir, exist_ok=True)
+  trainer.save_model(outputDir)
+  # Log the training metrics (e.g., loss, accuracy) to TensorBoard and save them to disk for later analysis.
+  trainer.log_metrics("train", trainResults.metrics)
+  trainer.save_metrics("train", trainResults.metrics)
+  trainer.save_state()
+
+  # Final validation evaluation and metrics logging.
+  # This will evaluate the best model on the validation set and log the metrics.
+  evalMetrics = trainer.evaluate()
+  trainer.log_metrics("eval", evalMetrics)
+  trainer.save_metrics("eval", evalMetrics)
+
+  # Extract log history from trainer state.
+  history = pd.DataFrame(trainer.state.log_history)
+  trainLoss = history[history["train_loss"].notna()][["step", "train_loss"]]
+  evalLoss = history[history["eval_loss"].notna()][["step", "eval_loss"]]
+  plt.figure()
+  # Plot training and validation loss.
+  plt.plot(trainLoss["step"], trainLoss["train_loss"], label="Training Loss")
+  plt.plot(evalLoss["step"], evalLoss["eval_loss"], label="Validation Loss")
+  plt.legend()
+  plt.grid()
+  plt.tight_layout()
+  # Save the figure to the History folder for later review.
+  plt.savefig(f"{outputDir}/History.png")
+  # Display the plot interactively.
+  # plt.show()  # Uncomment this line if you want to see the plot during execution.
+  plt.close()
+
+  # Optional: Evaluate on test set if provided and log the metrics.
+  # This uses the same validation transforms for consistency.
+  if (testDF is not None and len(testDF) > 0):
+    print("Evaluating on test set...")
+    # Create a Hugging Face Dataset from the test DataFrame using the same label mapping as the training set to
+    # ensure consistency in label encoding.
+    testDS = _CreateHFDataset(testDF, label2ID)
+    testDS.set_transform(_PreprocessVal)  # Use validation transforms for testing.
+    # Evaluate the model on the test dataset and log the metrics with a "test" prefix.
+    testMetrics = trainer.evaluate(testDS, metric_key_prefix="test")
+    # Log and save the test metrics separately from the training and validation metrics for clarity.
+    trainer.log_metrics("test", testMetrics)
+    trainer.save_metrics("test", testMetrics)
+    print(f"Test metrics: {testMetrics}")
+
+  # Memory cleanup to avoid issues in environments with limited GPU memory, especially after training and evaluation.
+  torch.cuda.empty_cache()
+
+  # Return the trainer object, evaluation metrics, and label mapping for potential further use (e.g., inference or additional evaluation).
+  return trainer, evalMetrics, label2ID
+
+
+def VisionTransformerInferenceDataFrame(
+  # Optional pd.DataFrame with "image_path" and "label" columns for inference.
+  # If None, inference will not be performed.
+  testDF=None,
+  # Directory containing the fine-tuned model and its configuration.
+  # This is used if `modelName` is not provided to load the model for inference.
+  outputDir=None,
+  # Optional pretrained model name (e.g., "google/vit-base-patch16-224") to
+  # load directly from Hugging Face Hub. If None, loads from `outputDir`.
+  modelName=None,
+):
+  # Load model and feature extractor.
+  if (modelName is not None):
+    # If a model name is provided, load the feature extractor and model directly from the pretrained
+    # model name (e.g., "google/vit-base-patch16-224").
+    featureExtractorX = ViTImageProcessor.from_pretrained(modelName)
+    modelX = ViTForImageClassification.from_pretrained(modelName)
+  else:
+    # Otherwise, load the feature extractor and model from the specified output directory,
+    # which should contain the fine-tuned model and its configuration.
+    featureExtractorX = ViTImageProcessor.from_pretrained(outputDir)
+    modelX = AutoModelForImageClassification.from_pretrained(outputDir)
+
+  # Set the model to evaluation mode and move it to the appropriate device (GPU if available, otherwise CPU).
+  modelX.eval()
+  # Determine the device to run inference on (GPU if available, otherwise CPU) and move the model to that device
+  # for faster inference.
+  device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+  modelX.to(device)
+
+  # Validate input DataFrame for inference.
+  # The test DataFrame must contain an "image_path" column to specify the paths of the images to be evaluated.
+  # The "label" column is optional but will be used for metrics calculation if present.
+  if (testDF is None or "image_path" not in testDF.columns):
+    raise ValueError("`testDF` must be provided with 'image_path' column.")
+
+  hasLabels = "label" in testDF.columns
+  results = []
+  validExtensions = {"png", "jpg", "bmp", "jpeg", "tiff", "tif"}
+
+  print(f"Starting inference on {len(testDF)} images...")
+
+  # Inference loop: iterate over each image in the test DataFrame, load and preprocess the image, run it
+  # through the model to get predictions, and store the results in a structured format for later analysis.
+  with torch.no_grad():
+    # Use tqdm to display a progress bar for the inference loop, which provides feedback on the progress of
+    # processing the test images.
+    for idx in tqdm.tqdm(range(len(testDF)), desc="Inference"):
+      # Extract the image path and actual label (if available) from the current row of the test DataFrame.
+      row = testDF.iloc[idx]
+      # Get the image path from the "image_path" column.
+      # This path should point to the location of the image file to be evaluated.
+      imgPath = row["image_path"]
+      # Get the actual label from the "label" column if it exists; otherwise, set it to None. This allows for metrics
+      # calculation later if labels are available, while still allowing inference to proceed without labels.
+      actualLabel = row["label"] if (hasLabels) else None
+
+      # Validate file extension to ensure only supported image formats are processed.
+      # This helps avoid errors when trying to load unsupported files.
+      ext = os.path.splitext(imgPath)[1].lower().lstrip(".")
+      if (ext not in validExtensions):
+        print(f"Skipping unsupported file: {imgPath}")
+        continue
+
+      try:
+        # Load and preprocess image using the feature extractor.
+        # The image is converted to RGB format to ensure compatibility with the model's expected input.
+        image = Image.open(imgPath).convert("RGB")
+        inputs = featureExtractorX(image, return_tensors="pt")
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        # Forward pass through the model to get logits, which are the raw output scores for each class
+        # before applying softmax.
+        outputs = modelX(**inputs)
+        logits = outputs.logits
+
+        # Extract predictions and probabilities from the logits.
+        # Apply softmax to convert logits to probabilities, and identify the predicted class index and its
+        # associated probability.
+        probabilities = logits.softmax(-1).cpu().tolist()[0]
+        # Get the index of the predicted class (the one with the highest logit score) and its corresponding probability.
+        predictedIdx = int(logits.argmax(-1).item())
+        # Get the maximum probability for the predicted class to provide confidence information about the prediction.
+        maxProb = probabilities[predictedIdx]
+        # Map the predicted class index back to the class label using the model's configuration, which contains the
+        # mapping from class IDs to labels. If the predicted index is not found in the mapping,
+        # a default label is generated.
+        predictedLabel = modelX.config.id2label[predictedIdx]
+
+        # Store results in a structured format for later analysis.
+        # This includes the image name, actual class (if available), predicted class, probability, and the
+        # full list of probabilities for all classes.
+        record = {
+          "Image Name"        : os.path.basename(imgPath),
+          "Image Path"        : imgPath,
+          "Actual Class"      : actualLabel if (hasLabels) else "N/A",
+          "Predicted Class ID": predictedIdx,
+          "Predicted Class"   : predictedLabel,
+          "Probability"       : round(float(maxProb), 4),
+          "Probabilities"     : [round(float(p), 4) for p in probabilities],
+        }
+        results.append(record)
+
+      except Exception as e:
+        print(f"Error processing {imgPath}: {e}")
+        continue
+
+  # ========================================================================
+  # SAVE AND ANALYZE RESULTS
+  # ========================================================================
+  if (not results):
+    print("No valid images processed.")
+    return None
+
+  # Create a DataFrame from the results for easier analysis and saving.
+  # This DataFrame will contain detailed information about each inference, including the predicted class,
+  # actual class (if available), probabilities, and other relevant details.
+  dfResults = pd.DataFrame(results)
+  os.makedirs(outputDir, exist_ok=True)
+
+  # Save detailed results to CSV for further analysis. This includes the predicted class, actual class
+  # (if available), probabilities, and other relevant information for each image.
+  dfResults.to_csv(
+    os.path.join(outputDir, "Test_Results.csv"),
+    index=False
+  )
+  print(f"Results saved to {os.path.join(outputDir, 'Test_Results.csv')}")
+
+  # Compute metrics if labels are available in the test DataFrame.
+  # This allows for evaluation of model performance on the test set using confusion matrix and derived metrics.
+  if (hasLabels):
+    # Filter out any rows with missing labels.
+    # This ensures that metrics are calculated only on samples where the actual class is known.
+    dfEval = dfResults[dfResults["Actual Class"] != "N/A"].copy()
+
+    if (len(dfEval) > 0):
+      references = dfEval["Actual Class"]
+      predictions = dfEval["Predicted Class"]
+
+      # Get sorted unique classes for consistent matrix ordering.
+      allClasses = sorted(set(references) | set(predictions))
+
+      # Confusion matrix calculation and visualization using sklearn's confusion_matrix and `ConfusionMatrixDisplay`.
+      # The confusion matrix is saved as a high-resolution PNG file for detailed analysis.
+      cm = confusion_matrix(references, predictions, labels=allClasses)
+      disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=allClasses)
+      disp.plot(xticks_rotation=45, cmap="Blues")
+      plt.tight_layout()
+      plt.savefig(
+        os.path.join(outputDir, "Test_ConfusionMatrix.png"),
+        dpi=720,
+        bbox_inches="tight",
+      )
+      plt.close()
+      print(f"Confusion matrix saved to {os.path.join(outputDir, 'Test_ConfusionMatrix.png')}")
+
+      # Calculate and save metrics derived from the confusion matrix, such as accuracy, precision, recall, and F1-score.
+      metrics = CalculateAllMetrics(cm)
+      dfMetrics = pd.DataFrame.from_dict(metrics, orient="index", columns=["Value"])
+      dfMetrics.to_csv(os.path.join(outputDir, "Test_Metrics.csv"))
+      print(f"Metrics saved to {os.path.join(outputDir, 'Test_Metrics.csv')}")
+
+      # Print summary of metrics to console for quick reference.
+      print(f"\n{'=' * 50}")
+      print(f"Test Set Summary ({len(dfEval)} samples):")
+      print(f"{'=' * 50}")
+      for key in metrics.keys():
+        if (isinstance(metrics[key], (int, float))):
+          print(f"{key:12s}: {metrics[key]:.4f}")
+      print(f"{'=' * 50}\n")
+
+  # Memory cleanup to avoid issues in environments with limited GPU memory,
+  # especially after inference and metrics calculation.
+  torch.cuda.empty_cache()
+
+  return dfResults

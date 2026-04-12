@@ -12,7 +12,7 @@ import os
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
-import cv2, warnings, json
+import cv2, warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -40,7 +40,7 @@ whichMagnification = "40X"  # Choose between "40X", "100X", "200X", and "400X".
 classes = ["adenosis", "fibroadenoma", "phyllodes_tumor", "tubular_adenoma"]
 # Base directory where extracted tiles or ROIs are stored.
 # Change this path to match your local setup where the BreaKHis dataset is stored.
-basePath = rf"C:\Users\Hossam\Downloads\BreaKHis_v1/histology_slides/breast/{whichCategory}/SOB"
+basePath = rf"G:/BreaKHis_v1/histology_slides/breast/{whichCategory}/SOB"
 
 # Check that the base path exists to avoid silent failures.
 if (not os.path.exists(basePath)):
@@ -87,7 +87,7 @@ print("DataFrame head:\n", dataFrame.head())
 noOfClasses = len(dataFrame["label"].unique())
 print(f"Number of unique classes: {noOfClasses}")
 
-# Train-test split of the dataset using sklearn's train_test_split function.
+# Train-test split of the dataset using sklearn's `train_test_split` function.
 trainDF, testDF = train_test_split(
   dataFrame,  # DataFrame containing image paths and labels.
   test_size=0.2,  # Use 20% of the data for testing and 80% for training.
@@ -128,17 +128,87 @@ configs["Optimizer"] = Adam(learning_rate=configs["LearningRate"])
 configs["HiddenActivation"] = "relu"
 configs["OutputActivation"] = "softmax"
 configs["NumClasses"] = 4
-configs["Epochs"] = 100
-
+configs["Epochs"] = 150
 outputDir = f"History/ViT Config1 {whichCategory} {whichMagnification}"
 os.makedirs(outputDir, exist_ok=True)
 
-# Store configs as JSON file in the output directory.
-# with open(f"{outputDir}/Configs.json", "w") as f:
-#   json.dump(configs, f, indent=4)
+# CONFIGS 2:
+# configs = {}
+# configs["NumEncoderLayers"] = 1
+# configs["MLPDimension"] = 64
+# configs["NumAttentionHeads"] = 1
+# configs["DropoutRatio"] = 0.1
+# configs["PatchSize"] = 16
+# configs["BatchSize"] = 16
+# configs["NumChannels"] = 3
+# configs["ImageSize"] = (128, 128, configs["NumChannels"])
+# configs["EmbedDimension"] = configs["PatchSize"] * configs["PatchSize"] * configs["NumChannels"]
+# configs["NumPatches"] = int(
+#   (configs["ImageSize"][0] // configs["PatchSize"]) *
+#   (configs["ImageSize"][1] // configs["PatchSize"])
+# )
+# configs["LossFunction"] = "categorical_crossentropy"
+# configs["LearningRate"] = 0.0001
+# configs["Optimizer"] = Adam(learning_rate=configs["LearningRate"])
+# configs["HiddenActivation"] = "gelu"  # Gaussian Error Linear Unit.
+# configs["OutputActivation"] = "softmax"
+# configs["NumClasses"] = 4
+# configs["Epochs"] = 150
+# outputDir = f"History/ViT Config2 {whichCategory} {whichMagnification}"
+# os.makedirs(outputDir, exist_ok=True)
+
+# CONFIGS 3:
+# configs = {}
+# configs["NumEncoderLayers"] = 5
+# configs["MLPDimension"] = 128
+# configs["NumAttentionHeads"] = 10
+# configs["DropoutRatio"] = 0.1
+# configs["PatchSize"] = 16
+# configs["BatchSize"] = 32
+# configs["NumChannels"] = 3
+# configs["ImageSize"] = (128, 128, configs["NumChannels"])
+# configs["EmbedDimension"] = configs["PatchSize"] * configs["PatchSize"] * configs["NumChannels"]
+# configs["NumPatches"] = int(
+#   (configs["ImageSize"][0] // configs["PatchSize"]) *
+#   (configs["ImageSize"][1] // configs["PatchSize"])
+# )
+# configs["LossFunction"] = "categorical_crossentropy"
+# configs["LearningRate"] = 0.0001
+# configs["Optimizer"] = Adam(learning_rate=configs["LearningRate"])
+# configs["HiddenActivation"] = "relu"
+# configs["OutputActivation"] = "softmax"
+# configs["NumClasses"] = 4
+# configs["Epochs"] = 150
+# outputDir = f"History/ViT Config3 {whichCategory} {whichMagnification}"
+# os.makedirs(outputDir, exist_ok=True)
+
+# CONFIGS 4:
+# configs = {}
+# configs["NumEncoderLayers"] = 5
+# configs["MLPDimension"] = 128
+# configs["NumAttentionHeads"] = 10
+# configs["DropoutRatio"] = 0.25
+# configs["PatchSize"] = 16
+# configs["BatchSize"] = 32
+# configs["NumChannels"] = 3
+# configs["ImageSize"] = (128, 128, configs["NumChannels"])
+# configs["EmbedDimension"] = configs["PatchSize"] * configs["PatchSize"] * configs["NumChannels"]
+# configs["NumPatches"] = int(
+#   (configs["ImageSize"][0] // configs["PatchSize"]) *
+#   (configs["ImageSize"][1] // configs["PatchSize"])
+# )
+# configs["LossFunction"] = "categorical_crossentropy"
+# configs["LearningRate"] = 0.0001
+# configs["Optimizer"] = Adam(learning_rate=configs["LearningRate"])
+# configs["HiddenActivation"] = "relu"
+# configs["OutputActivation"] = "softmax"
+# configs["NumClasses"] = 4
+# configs["Epochs"] = 150
+# outputDir = f"History/ViT Config4 {whichCategory} {whichMagnification}"
+# os.makedirs(outputDir, exist_ok=True)
 
 # Create generators from DataFrames
-trainGen = PatchDataGeneratorFromDataFrame(
+trainGen = ViTPatchDataGeneratorFromDataFrame(
   dataFrame=trainDF,
   inputShape=configs["ImageSize"],
   batchSize=configs["BatchSize"],
@@ -149,7 +219,7 @@ trainGen = PatchDataGeneratorFromDataFrame(
   shuffle=True
 )
 
-valGen = PatchDataGeneratorFromDataFrame(
+valGen = ViTPatchDataGeneratorFromDataFrame(
   dataFrame=valDF,
   inputShape=configs["ImageSize"],
   batchSize=configs["BatchSize"],
@@ -160,7 +230,7 @@ valGen = PatchDataGeneratorFromDataFrame(
   shuffle=False
 )
 
-testGen = PatchDataGeneratorFromDataFrame(
+testGen = ViTPatchDataGeneratorFromDataFrame(
   dataFrame=testDF,
   inputShape=configs["ImageSize"],
   batchSize=configs["BatchSize"],
@@ -199,7 +269,7 @@ history = model.fit(
     # TensorBoard callback to log training for visualization.
     TensorBoard(log_dir=f"{outputDir}/TB/Logs", histogram_freq=1),
   ],
-  verbose=1,
+  verbose=2,
 )
 
 # Load the best model saved during training.
@@ -249,11 +319,11 @@ yCatPred = model.predict(testGen, batch_size=configs["BatchSize"], verbose=0)
 # Convert the one-hot predictions to class indices.
 yPred = np.argmax(yCatPred, axis=1)
 # Get true class indices from the test generator.
-yTrue = testGen.classes
+yTrue = testGen.yTrueIndices
 # Compute the confusion matrix between true and predicted labels.
 cm = confusion_matrix(yTrue, yPred)
 # Create a display object and plot the confusion matrix.
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=testGen.class_indices)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=testGen.classIndices)
 # Show the confusion matrix plot.
 disp.plot()
 # Rotate x-axis labels for better readability.
@@ -271,75 +341,6 @@ print("Performance Metrics:")
 results = CalculateAllMetrics(cm)
 for key, value in results.items():
   print(f"{key}:", value)
-
-# CONFIGS 2:
-# configs = {}
-# configs["NumEncoderLayers"] = 1
-# configs["MLPDimension"] = 64
-# configs["NumAttentionHeads"] = 1
-# configs["DropoutRatio"] = 0.1
-# configs["PatchSize"] = 16
-# configs["BatchSize"] = 16
-# configs["NumChannels"] = 3
-# configs["ImageSize"] = (128, 128, configs["NumChannels"])
-# configs["EmbedDimension"] = configs["PatchSize"] * configs["PatchSize"] * configs["NumChannels"]
-# configs["NumPatches"] = int(
-#   (configs["ImageSize"][0] // configs["PatchSize"]) *
-#   (configs["ImageSize"][1] // configs["PatchSize"])
-# )
-# configs["LossFunction"] = "categorical_crossentropy"
-# configs["LearningRate"] = 0.0001
-# configs["Optimizer"] = Adam(learning_rate=configs["LearningRate"])
-# configs["HiddenActivation"] = "gelu"  # Gaussian Error Linear Unit.
-# configs["OutputActivation"] = "softmax"
-# configs["NumClasses"] = 4
-# configs["Epochs"] = 100
-
-# CONFIGS 3:
-# configs = {}
-# configs["NumEncoderLayers"] = 1
-# configs["MLPDimension"] = 64
-# configs["NumAttentionHeads"] = 10
-# configs["DropoutRatio"] = 0.1
-# configs["PatchSize"] = 16
-# configs["BatchSize"] = 16
-# configs["NumChannels"] = 3
-# configs["ImageSize"] = (128, 128, configs["NumChannels"])
-# configs["EmbedDimension"] = configs["PatchSize"] * configs["PatchSize"] * configs["NumChannels"]
-# configs["NumPatches"] = int(
-#   (configs["ImageSize"][0] // configs["PatchSize"]) *
-#   (configs["ImageSize"][1] // configs["PatchSize"])
-# )
-# configs["LossFunction"] = "categorical_crossentropy"
-# configs["LearningRate"] = 0.0001
-# configs["Optimizer"] = Adam(learning_rate=configs["LearningRate"])
-# configs["HiddenActivation"] = "gelu"  # Gaussian Error Linear Unit.
-# configs["OutputActivation"] = "softmax"
-# configs["NumClasses"] = 4
-# configs["Epochs"] = 100
-
-# CONFIGS 4:
-# configs = {}
-# configs["NumEncoderLayers"] = 1
-# configs["MLPDimension"] = 512
-# configs["NumAttentionHeads"] = 25
-# configs["DropoutRatio"] = 0.25
-# configs["PatchSize"] = 16
-# configs["BatchSize"] = 16
-# configs["NumChannels"] = 3
-# configs["ImageSize"] = (128, 128, configs["NumChannels"])
-# configs["EmbedDimension"] = configs["PatchSize"] * configs["PatchSize"] * configs["NumChannels"]
-# configs["NumPatches"] = int(
-#   (configs["ImageSize"][0] // configs["PatchSize"]) *
-#   (configs["ImageSize"][1] // configs["PatchSize"])
-# )
-# configs["LossFunction"] = "categorical_crossentropy"
-# configs["LearningRate"] = 0.0001
-# configs["Optimizer"] = Adam(learning_rate=configs["LearningRate"])
-# configs["HiddenActivation"] = "gelu"  # Gaussian Error Linear Unit.
-# configs["OutputActivation"] = "softmax"
-# configs["NumClasses"] = 4
-# configs["Epochs"] = 100
 
 # # Visualize the data.
 # sampleBatch = trainGen[0]
