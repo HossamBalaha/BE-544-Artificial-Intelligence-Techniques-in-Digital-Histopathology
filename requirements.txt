@@ -13,7 +13,7 @@ optuna-dashboard
 patchify==0.2.3
 torch==2.7.1+cu128
 torchvision==0.22.1+cu128
-transformers==4.*
+transformers==5.*
 datasets==4.*
 pillow==11.*
 tensorboard==2.*
@@ -30,7 +30,7 @@ tqdm==4.67.1
 trimesh==4.11.*
 xgboost==3.1.*
 medmnist==3.0.2
-huggingface-hub==0.36.*
+huggingface-hub==1.*
 sentence_transformers==5.*
 pymupdf==1.26.*
 openslide-bin==4.0.0.*
